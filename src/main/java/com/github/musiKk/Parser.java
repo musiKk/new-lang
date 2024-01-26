@@ -13,25 +13,34 @@ public class Parser {
     public CompilationUnit parseCompilationUnit(Tokens tokens) {
         var token = tokens.peek();
 
-        List<DataDefinition> dataDefinitions = new ArrayList<>();
-        List<FunctionDeclaration> functionDeclarations = new ArrayList<>();
-        List<Expression> expressions = new ArrayList<>();
+        List<Statement> statements = new ArrayList<>();
 
         while (token.type() != TokenType.EOF) {
-            if (token.type() == TokenType.DATA) {
-                var type = parseDataDefinition(tokens);
-                dataDefinitions.add(type);
-            } else if (token.type() == TokenType.DEF) {
-                var functionDeclaration = parseFunctionDeclaration(tokens);
-                functionDeclarations.add(functionDeclaration);
-            } else {
-                var expression = parseExpression(tokens);
-                expressions.add(expression);
-            }
+            var statement = parseStatement(tokens);
+            statements.add(statement);
             token = tokens.peek();
         }
 
-        return new CompilationUnit(dataDefinitions, functionDeclarations);
+        return new CompilationUnit(statements);
+    }
+
+    private Statement parseStatement(Tokens tokens) {
+        var token = tokens.peek();
+
+        return switch (token.type()) {
+            case DATA -> parseDataDefinition(tokens);
+            case DEF -> parseFunctionDeclaration(tokens);
+            case VAR -> {
+                tokens.next();
+                var variableDeclaration = parseVariableDeclaration(tokens);
+                yield new ExpressionStatement(new VariableExpression(Optional.empty(), variableDeclaration.name()));
+            }
+            // case LBRACE -> {
+            //     var expression = parseBlockExpression(tokens);
+            //     yield new ExpressionStatement(expression);
+            // }
+            default -> new ExpressionStatement(parseExpression(tokens));
+        };
     }
 
     private DataDefinition parseDataDefinition(Tokens tokens) {
@@ -123,8 +132,6 @@ public class Parser {
 
         var expression = switch (token.type()) {
             case IDENTIFIER -> {
-                // var nameToken = tokens.next(TokenType.IDENTIFIER);
-                // yield new VariableExpression(Optional.empty(), nameToken.image());
                 yield parseNameExpression(tokens);
             }
             case NUMBER -> {
@@ -321,6 +328,11 @@ public class Parser {
 
 }
 
+interface Statement {}
+record ExpressionStatement(
+    Expression expression
+) implements Statement {}
+
 sealed interface Expression permits
     BlockExpression,
     NumberExpression,
@@ -373,12 +385,12 @@ record FunctionDeclaration(
     List<VariableDeclaration> parameters,
     String returnType,
     Expression body
-) {}
+) implements Statement {}
 record VariableDeclaration(
     String name,
     String type,
     Optional<Expression> initializer
-) {
+) implements Statement {
     public VariableDeclaration(String name, String type) {
         this(name, type, Optional.empty());
     }
@@ -386,8 +398,7 @@ record VariableDeclaration(
 record DataDefinition(
     String name,
     List<VariableDeclaration> variableDeclarations
-) {}
+) implements Statement {}
 record CompilationUnit(
-    List<DataDefinition> dataDefinitions,
-    List<FunctionDeclaration> functionDeclarations
+    List<Statement> statements
 ) {}

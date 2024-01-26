@@ -105,10 +105,16 @@ public class Runner {
         RuntimeFile runtimeFile = new RuntimeFile();
         runtimeFiles.put(name, runtimeFile);
 
-        compilationUnit.dataDefinitions().stream().forEach(dataDefinition -> {
+        compilationUnit.statements().stream()
+                .filter(s -> s instanceof DataDefinition)
+                .map(s -> (DataDefinition) s)
+                .forEach(dataDefinition -> {
             runtimeFile.dataDefinitions.put(dataDefinition.name(), dataDefinition);
         });
-        compilationUnit.functionDeclarations().stream().forEach(functionDeclaration -> {
+        compilationUnit.statements().stream()
+                .filter(s -> s instanceof FunctionDeclaration)
+                .map(s -> (FunctionDeclaration) s)
+                .forEach(functionDeclaration -> {
             runtimeFile.functions.put(functionDeclaration.name(), Function.of(functionDeclaration));
         });
         return runtimeFile;
