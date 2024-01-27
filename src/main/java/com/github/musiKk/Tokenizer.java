@@ -14,19 +14,11 @@ public class Tokenizer {
     List<Pattern> patterns = new ArrayList<>();
 
     {
-        patterns.add(new StaticPattern("data", TokenType.DATA));
-        patterns.add(new StaticPattern("def", TokenType.DEF));
-        patterns.add(new StaticPattern("var", TokenType.VAR));
-
-        patterns.add(new StaticPattern("{", TokenType.LBRACE));
-        patterns.add(new StaticPattern("}", TokenType.RBRACE));
-        patterns.add(new StaticPattern(":", TokenType.COLON));
-        patterns.add(new StaticPattern("=", TokenType.EQUALS));
-        patterns.add(new StaticPattern("*", TokenType.STAR));
-        patterns.add(new StaticPattern("(", TokenType.LPAREN));
-        patterns.add(new StaticPattern(")", TokenType.RPAREN));
-        patterns.add(new StaticPattern(".", TokenType.DOT));
-        patterns.add(new StaticPattern(",", TokenType.COMMA));
+        for (var tokenType : TokenType.values()) {
+            if (tokenType.constantPattern != null) {
+                patterns.add(new StaticPattern(tokenType.constantPattern, tokenType));
+            }
+        }
 
         patterns.add(new IdentifierPattern());
         patterns.add(new NumberPattern());
@@ -182,27 +174,38 @@ public class Tokenizer {
         }
     }
     enum TokenType {
-        DATA,
-        DEF,
-        VAR,
+        DATA("data"),
+        DEF("def"),
+        VAR("var"),
 
         NUMBER,
         STRING,
 
+        PLUS("+"), MINUS("-"),
+        STAR("*"), SLASH("/"),
+
         COMMENT,
 
-        LBRACE,
-        RBRACE,
-        LPAREN,
-        RPAREN,
+        LBRACE("{"),
+        RBRACE("}"),
+        LPAREN("("),
+        RPAREN(")"),
 
-        COLON,
-        EQUALS,
-        STAR,
+        COLON(":"),
+        EQUALS("="),
         IDENTIFIER,
-        DOT,
-        COMMA,
-        EOF
+        DOT("."),
+        COMMA(","),
+        EOF;
+
+        String constantPattern;
+
+        private TokenType() {
+            this(null);
+        }
+        private TokenType(String constantPattern) {
+            this.constantPattern = constantPattern;
+        }
     }
 
     @RequiredArgsConstructor
@@ -222,6 +225,16 @@ public class Tokenizer {
                 index++;
             }
             return tokens.get(index);
+        }
+
+        public boolean matches(TokenType... types) {
+            TokenType peekType = peek().type();
+            for (var type : types) {
+                if (peekType == type) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         public Token peek(TokenType type) {
