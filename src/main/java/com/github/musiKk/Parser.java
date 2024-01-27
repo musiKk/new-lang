@@ -128,6 +128,32 @@ public class Parser {
     }
 
     private Expression parseExpression(Tokens tokens) {
+        return parsePlus(tokens);
+    }
+
+    private Expression parsePlus(Tokens tokens) {
+        var expr = parseTimes(tokens);
+
+        while (tokens.matches(TokenType.PLUS, TokenType.MINUS)) {
+            var operator = tokens.next().type();
+            var right = parseTimes(tokens);
+            expr = new BinaryExpression(expr, operator, right);
+        }
+        return expr;
+    }
+
+    private Expression parseTimes(Tokens tokens) {
+        var expr = parseAtom(tokens);
+
+        while (tokens.matches(TokenType.STAR, TokenType.SLASH)) {
+            var operator = tokens.next().type();
+            var right = parseAtom(tokens);
+            expr = new BinaryExpression(expr, operator, right);
+        }
+        return expr;
+    }
+
+    private Expression parseAtom(Tokens tokens) {
         var token = tokens.peek();
 
         var expression = switch (token.type()) {
@@ -292,13 +318,47 @@ public class Parser {
         testCases.add(new ExpressionTestCase(
             "foo.bar()",
             new FunctionEvaluationExpression(Optional.of(new VariableExpression("foo")), "bar", List.of())));
+        testCases.add(new ExpressionTestCase(
+            "a + b",
+            new BinaryExpression(new VariableExpression("a"), TokenType.PLUS, new VariableExpression("b"))));
+        testCases.add(new ExpressionTestCase(
+            "a + b * c",
+            new BinaryExpression(
+                new VariableExpression("a"),
+                TokenType.PLUS,
+                new BinaryExpression(
+                    new VariableExpression("b"),
+                    TokenType.STAR,
+                    new VariableExpression("c")))));
+        testCases.add(new ExpressionTestCase(
+            "a + b.c",
+            new BinaryExpression(
+                new VariableExpression("a"),
+                TokenType.PLUS,
+                new VariableExpression(Optional.of(new VariableExpression("b")), "c"))));
+        testCases.add(new ExpressionTestCase(
+            "a + b.c()",
+            new BinaryExpression(
+                new VariableExpression("a"),
+                TokenType.PLUS,
+                new FunctionEvaluationExpression(Optional.of(new VariableExpression("b")), "c", List.of()))));
+        testCases.add(new ExpressionTestCase(
+            "a.b.c",
+            new VariableExpression(Optional.of(new VariableExpression( Optional.of(new VariableExpression("a")), "b")), "c")));
 
         for (var testCase : testCases) {
+            System.err.printf("%-30s", testCase.input());
+
             var tokens = new Tokenizer().tokenize(testCase.input());
             var result = testCase.parseFn().apply(p, tokens);
-            System.err.println(result);
-            System.err.println(testCase.expected());
-            System.err.println(result.equals(testCase.expected()));
+            if (!result.equals(testCase.expected())) {
+                System.err.println("FAIL");
+                System.err.println("got:      " + result);
+                System.err.println("expected: " + testCase.expected());
+
+            } else {
+                System.err.println("OK");
+            }
         }
     }
 
@@ -338,7 +398,8 @@ sealed interface Expression permits
     NumberExpression,
     StringExpression,
     VariableExpression,
-    FunctionEvaluationExpression
+    FunctionEvaluationExpression,
+    BinaryExpression
 {}
 record BlockExpression(
     List<Expression> expressions
@@ -357,6 +418,11 @@ record VariableExpression(
         this(Optional.empty(), name);
     }
 }
+record BinaryExpression(
+    Expression left,
+    TokenType operator,
+    Expression right
+) implements Expression {}
 
 record FunctionEvaluationExpression(
     Optional<Expression> target,
