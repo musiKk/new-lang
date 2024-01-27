@@ -66,6 +66,7 @@ public class Parser {
         return new DataDefinition(nameToken.image(), variableDeclarations);
     }
 
+    // <> def receiver? . name "(" parameters* ")" (":" type)? "=" expression
     private FunctionDeclaration parseFunctionDeclaration(Tokens tokens) {
         tokens.next(TokenType.DEF);
         var nameToken = tokens.next(TokenType.IDENTIFIER);
@@ -212,7 +213,7 @@ public class Parser {
         // }
     }
 
-    // name <>
+    // <> name
     private Expression parseNameExpression(Tokens tokens) {
         var nameToken = tokens.next(TokenType.IDENTIFIER);
         var token = tokens.peek();
@@ -224,7 +225,7 @@ public class Parser {
         };
     }
 
-    // expression . <>
+    // expression <> .
     private Expression parseDottedExpression(Tokens tokens, Expression expression) {
         tokens.next(TokenType.DOT);
 
@@ -282,17 +283,17 @@ public class Parser {
 
     private BlockExpression parseBlockExpression(Tokens tokens) {
         tokens.next(TokenType.LBRACE);
-        var expressions = new ArrayList<Expression>();
+        var statements = new ArrayList<Statement>();
         while (true) {
             var token = tokens.peek();
             if (token.type() == TokenType.RBRACE) {
                 tokens.next();
                 break;
             }
-            var expression = parseExpression(tokens);
-            expressions.add(expression);
+            var statement = parseStatement(tokens);
+            statements.add(statement);
         }
-        return new BlockExpression(expressions);
+        return new BlockExpression(statements);
     }
 
     public static void main(String[] args) {
@@ -402,7 +403,7 @@ sealed interface Expression permits
     BinaryExpression
 {}
 record BlockExpression(
-    List<Expression> expressions
+    List<Statement> statements
 ) implements Expression {}
 record NumberExpression(
     int number

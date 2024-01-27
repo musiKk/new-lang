@@ -3,9 +3,7 @@ package com.github.musiKk;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -13,7 +11,7 @@ import java.util.Optional;
 
 public class Runner {
 
-    Map<String, RuntimeFile> runtimeFiles = new HashMap<>();
+    Map<Path, RuntimeFile> runtimeFiles = new HashMap<>();
 
     Map<String, NativeFunction> nativeFunctions = new HashMap<>();
 
@@ -22,47 +20,50 @@ public class Runner {
     }
 
     public static void main(String[] args) {
-        new Runner().runFile("test.tst");
-    }
-
-    private void runFile(String name) {
-        String fileContent;
-        try {
-            fileContent = Files.readString(Path.of(name));
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-        var compilationUnit = new Parser().parseCompilationUnit(
-            new Tokenizer().tokenize(fileContent));
-
-        var runtimeFile = creaRuntimeFile(name, compilationUnit);
+        // new Runner().runFile("test.tst");
+        var runner = new Runner();
+        var mainStackFrame = new DefaultStackFrame();
+        var runtimeFile = runner.getOrInitRuntimeFile("test.tst", mainStackFrame);
         var main = runtimeFile.functions.get("main");
-
-        execute(main, new StackFrame());
+        if (main != null) {
+            runner.execute(main, mainStackFrame);
+        }
     }
 
-    private void execute(Function functionDeclaration, StackFrame stack) {
-        var stackFrame = new StackFrame();
-        var scope = new Scope();
-        stackFrame.scopes.push(scope);
-
-        evaluateExpression(functionDeclaration.body(), stackFrame);
+    private RuntimeFile getOrInitRuntimeFile(String pathString, StackFrame frame) {
+        var path = Path.of(pathString);
+        var rf = runtimeFiles.computeIfAbsent(path, __ -> {
+            var runtimeFile = initRuntimeFile(path, frame);
+            return runtimeFile;
+        });
+        runtimeFiles.put(path, rf);
+        return rf;
     }
 
-    private Value evaluateExpression(Expression expression, StackFrame stackFrame) {
+    private void execute(List<Statement> statements, StackFrame frame) {
+        for (var statement : statements) {
+            execute(statement, frame);
+        }
+    }
+
+    private void execute(Function functionDeclaration, StackFrame frame) {
+        execute(List.of(new ExpressionStatement(functionDeclaration.body())), frame.pushFrame());
+    }
+
+    private Value evaluateExpression(Expression expression, StackFrame frame) {
         return switch (expression) {
             case NumberExpression ne -> new NumberValue(ne.number());
             case StringExpression se -> new StringValue(se.string());
             case VariableExpression ve -> {
                 var optTarget = ve.target();
-                Optional<Value> optReceiver = optTarget.map(t -> evaluateExpression(t, stackFrame));
+                Optional<Value> optReceiver = optTarget.map(t -> evaluateExpression(t, frame));
                 yield optReceiver.map(receiver -> {
                     if (receiver instanceof DataValue dv) {
                         return dv.fields().get(ve.name());
                     } else {
                         throw new RuntimeException("cannot look up fields in values " + receiver);
                     }
-                }).orElse(stackFrame.scopes.peek().variables.get(ve.name()));
+                }).orElse(frame.getVariable(ve.name()));
             }
             case FunctionEvaluationExpression fe -> {
                 var functionName = fe.name();
@@ -71,15 +72,15 @@ public class Runner {
                 if (nativeFunctions.containsKey(functionName)) {
                     parameters = nativeFunctions.get(functionName).parameters();
                 } else {
+                    // TODO look up function in avalable symbols
                     parameters = runtimeFiles.get(fe.name()).functions.get(fe.name()).parameters();
                 }
 
-                var newStackFrame = new StackFrame();
-                var scope = newStackFrame.scopes.peek();
+                var newStackFrame = frame.pushFrame();
                 for (int i = 0; i < fe.arguments().size(); i++) {
                     var argument = fe.arguments().get(i);
-                    var value = evaluateExpression(argument, stackFrame);
-                    scope.variables.put(parameters.get(i).name(), value);
+                    var value = evaluateExpression(argument, frame);
+                    newStackFrame.putVariable(parameters.get(i).name(), value);
                 }
                 if (nativeFunctions.containsKey(functionName)) {
                     var nativeFunction = nativeFunctions.get(functionName);
@@ -89,35 +90,80 @@ public class Runner {
                 yield evaluateExpression(function.body(), newStackFrame);
             }
             case BlockExpression be -> {
-                stackFrame.pushScope();
+                frame.pushFrame();
                 Value result = null;
-                for (var statement : be.expressions()) {
-                    result = evaluateExpression(statement, stackFrame);
+                for (var statement : be.statements()) {
+                    result = execute(statement, frame);
                 }
-                stackFrame.popScope();
                 yield result;
             }
             default -> throw new RuntimeException("not yet implemented " + expression);
         };
     }
 
-    private RuntimeFile creaRuntimeFile(String name, CompilationUnit compilationUnit) {
-        RuntimeFile runtimeFile = new RuntimeFile();
-        runtimeFiles.put(name, runtimeFile);
+    private Value execute(Statement expression, StackFrame frame) {
+        return switch (expression) {
+            case ExpressionStatement(Expression e) -> evaluateExpression(e, frame);
+            default -> throw new RuntimeException("not yet implemented " + expression);
+        };
+    }
 
-        compilationUnit.statements().stream()
-                .filter(s -> s instanceof DataDefinition)
-                .map(s -> (DataDefinition) s)
-                .forEach(dataDefinition -> {
-            runtimeFile.dataDefinitions.put(dataDefinition.name(), dataDefinition);
-        });
-        compilationUnit.statements().stream()
-                .filter(s -> s instanceof FunctionDeclaration)
-                .map(s -> (FunctionDeclaration) s)
-                .forEach(functionDeclaration -> {
-            runtimeFile.functions.put(functionDeclaration.name(), Function.of(functionDeclaration));
-        });
+    private RuntimeFile initRuntimeFile(Path path, StackFrame frame) {
+        String fileContent;
+        try {
+            fileContent = Files.readString(path);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        var compilationUnit = new Parser().parseCompilationUnit(new Tokenizer().tokenize(fileContent));
+
+        RuntimeFile runtimeFile = new RuntimeFile();
+
+        var processingResult = compilationUnit.statements().stream()
+                .reduce(new CompilationUnitProcessingResult(), (result, statement) -> {
+                    if (statement instanceof DataDefinition dataDefinition) {
+                        result.addDataDefinition(dataDefinition);
+                    } else if (statement instanceof FunctionDeclaration functionDeclaration) {
+                        result.addFunction(Function.of(functionDeclaration));
+                    } else {
+                        result.addStatement(statement);
+                    }
+                    return result;
+                }, (r1, r2) -> {
+                    r1.statements.addAll(r2.statements);
+                    r1.dataDefinitions.putAll(r2.dataDefinitions);
+                    r1.functions.putAll(r2.functions);
+                    return r1;
+                });
+
+        runtimeFile.dataDefinitions.putAll(processingResult.dataDefinitions());
+        runtimeFile.functions.putAll(processingResult.functions());
+
+        execute(processingResult.statements(), new RuntimeFileStackFrame(runtimeFile, frame));
+
         return runtimeFile;
+    }
+
+    record CompilationUnitProcessingResult(
+        List<Statement> statements,
+        Map<String, DataDefinition> dataDefinitions,
+        Map<String, Function> functions
+    ) {
+        public CompilationUnitProcessingResult() {
+            this(new ArrayList<>(), new HashMap<>(), new HashMap<>());
+        }
+        CompilationUnitProcessingResult addStatement(Statement statement) {
+            statements.add(statement);
+            return this;
+        }
+        CompilationUnitProcessingResult addDataDefinition(DataDefinition dataDefinition) {
+            dataDefinitions.put(dataDefinition.name(), dataDefinition);
+            return this;
+        }
+        CompilationUnitProcessingResult addFunction(Function function) {
+            functions.put(function.name(), function);
+            return this;
+        }
     }
 
     static class RuntimeFile {
@@ -126,26 +172,51 @@ public class Runner {
         private Map<String, DataDefinition> dataDefinitions = new HashMap<>();
     }
 
-    static class Scope {
-        private Map<String, Value> variables = new HashMap<>();
-        public Scope() {}
-        public Scope(Scope parent) {
-            variables.putAll(parent.variables);
+    interface StackFrame {
+        Value getVariable(String name);
+        void putVariable(String name, Value value);
+        StackFrame pushFrame();
+    }
+
+    record RuntimeFileStackFrame(
+        RuntimeFile runtimeFile,
+        StackFrame parent
+    ) implements StackFrame {
+        @Override
+        public StackFrame pushFrame() {
+            return new DefaultStackFrame(this);
+        }
+        @Override
+        public Value getVariable(String name) {
+            return runtimeFile.variables.get(name);
+        }
+        @Override
+        public void putVariable(String name, Value value) {
+            runtimeFile.variables.put(name, value);
         }
     }
 
-    static class StackFrame {
-        private Deque<Scope> scopes = new ArrayDeque<>();
-        public StackFrame() {
-            scopes.push(new Scope());
+    record DefaultStackFrame(
+        Map<String, Value> variables,
+        StackFrame parent
+    ) implements StackFrame {
+        DefaultStackFrame() {
+            this(new HashMap<>(), null);
         }
-        public Scope pushScope() {
-            var scope = new Scope(scopes.peek());
-            scopes.push(scope);
-            return scope;
+        DefaultStackFrame(StackFrame parent) {
+            this(new HashMap<>(), parent);
         }
-        public void popScope() {
-            scopes.pop();
+        @Override
+        public StackFrame pushFrame() {
+            return new DefaultStackFrame(this);
+        }
+        @Override
+        public Value getVariable(String name) {
+            return variables.get(name);
+        }
+        @Override
+        public void putVariable(String name, Value value) {
+            variables.put(name, value);
         }
     }
 
@@ -194,7 +265,7 @@ public class Runner {
     static class PrintFunction implements NativeFunction {
         @Override
         public Value call(StackFrame stackFrame) {
-            var args = stackFrame.scopes.peek().variables.get("args");
+            var args = stackFrame.getVariable("args");
             String representation = switch (args) {
                 case null -> "null";
                 case NumberValue nv -> String.valueOf(nv.number());
