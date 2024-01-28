@@ -6,9 +6,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import lombok.RequiredArgsConstructor;
-import lombok.ToString;
-
 public class Tokenizer {
 
     List<Pattern> patterns = new ArrayList<>();
@@ -76,7 +73,6 @@ public class Tokenizer {
         Optional<Token> match(String programString, int index);
     }
 
-    @ToString
     static class StaticPattern implements Pattern {
         String pattern;
         TokenType tokenType;
@@ -209,10 +205,13 @@ public class Tokenizer {
         }
     }
 
-    @RequiredArgsConstructor
-    public static class Tokens {
+    static class Tokens {
         final List<Token> tokens;
         int index;
+
+        Tokens(List<Token> tokens) {
+            this.tokens = tokens;
+        }
 
         public Token next() {
             while (tokens.get(index).type() == TokenType.COMMENT) {
