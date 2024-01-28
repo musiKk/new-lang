@@ -1,6 +1,9 @@
 def main() = {
     print("hello world")
+    print(x)
 }
+
+var x = 1
 
 // var Point = data {
 //     x: int
