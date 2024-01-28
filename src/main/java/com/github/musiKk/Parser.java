@@ -28,19 +28,21 @@ public class Parser {
         var token = tokens.peek();
 
         return switch (token.type()) {
+            case IMPORT -> parseImportStatement(tokens);
             case DATA -> parseDataDefinition(tokens);
             case DEF -> parseFunctionDeclaration(tokens);
             case VAR -> {
                 tokens.next();
-                var variableDeclaration = parseVariableDeclaration(tokens);
-                yield new ExpressionStatement(new VariableExpression(Optional.empty(), variableDeclaration.name()));
+                yield parseVariableDeclaration(tokens);
             }
-            // case LBRACE -> {
-            //     var expression = parseBlockExpression(tokens);
-            //     yield new ExpressionStatement(expression);
-            // }
             default -> new ExpressionStatement(parseExpression(tokens));
         };
+    }
+
+    private Import parseImportStatement(Tokens tokens) {
+        tokens.next(TokenType.IMPORT);
+        var nameToken = tokens.next(TokenType.STRING);
+        return new Import(nameToken.image());
     }
 
     private DataDefinition parseDataDefinition(Tokens tokens) {
@@ -117,15 +119,19 @@ public class Parser {
 
     private VariableDeclaration parseVariableDeclaration(Tokens tokens) {
         var nameToken = tokens.next(TokenType.IDENTIFIER);
-        tokens.next(TokenType.COLON);
-        var typeToken = tokens.next(TokenType.IDENTIFIER);
+
+        Optional<String> type = Optional.empty();
+        if (tokens.matches(TokenType.COLON)) {
+            tokens.next();
+            var typeToken = tokens.next(TokenType.IDENTIFIER);
+            type = Optional.of(typeToken.image());
+        }
         Optional<Expression> initialization = Optional.empty();
-        var token = tokens.peek();
-        if (token.type() == TokenType.EQUALS) {
+        if (tokens.matches(TokenType.EQUALS)) {
             tokens.next();
             initialization = Optional.of(parseExpression(tokens));
         }
-        return new VariableDeclaration(nameToken.image(), typeToken.image(), initialization);
+        return new VariableDeclaration(nameToken.image(), type, initialization);
     }
 
     private Expression parseExpression(Tokens tokens) {
@@ -300,10 +306,12 @@ public class Parser {
         var p = new Parser();
 
         List<TestCase<?>> testCases = new ArrayList<>();
-        testCases.add(new DataDefinitionTestCase(
+        testCases.add(new StatementTestCase(
             "data Foo { x: int }",
             new DataDefinition("Foo", List.of(new VariableDeclaration("x", "int")))
             ));
+        testCases.add(new StatementTestCase(
+            "var x = 1", new VariableDeclaration("x", new NumberExpression(1))));
         testCases.add(new ExpressionTestCase(
             "foo()",
             new FunctionEvaluationExpression("foo", List.of())));
@@ -369,12 +377,12 @@ public class Parser {
         BiFunction<Parser, Tokens, T> parseFn();
     }
 
-    record DataDefinitionTestCase(
+    record StatementTestCase(
         String input,
-        DataDefinition expected
-    ) implements TestCase<DataDefinition> {
-        public BiFunction<Parser, Tokens, DataDefinition> parseFn() {
-            return (parser, tokens) -> parser.parseDataDefinition(tokens);
+        Statement expected
+    ) implements TestCase<Statement> {
+        public BiFunction<Parser, Tokens, Statement> parseFn() {
+            return (parser, tokens) -> parser.parseStatement(tokens);
         }
     }
 
@@ -389,7 +397,14 @@ public class Parser {
 
 }
 
-interface Statement {}
+sealed interface Statement permits
+    ExpressionStatement,
+    Import,
+    FunctionDeclaration,
+    VariableDeclaration,
+    DataDefinition
+{}
+
 record ExpressionStatement(
     Expression expression
 ) implements Statement {}
@@ -446,6 +461,7 @@ record StandaloneFunctionReceiver() implements FunctionReceiverType {
     }
 }
 
+record Import(String name) implements Statement {}
 record FunctionDeclaration(
     FunctionReceiverType receiver,
     String name,
@@ -455,11 +471,17 @@ record FunctionDeclaration(
 ) implements Statement {}
 record VariableDeclaration(
     String name,
-    String type,
+    Optional<String> type,
     Optional<Expression> initializer
 ) implements Statement {
-    public VariableDeclaration(String name, String type) {
+    public VariableDeclaration(String name, Optional<String> type) {
         this(name, type, Optional.empty());
+    }
+    public VariableDeclaration(String name, String type) {
+        this(name, Optional.of(type), Optional.empty());
+    }
+    public VariableDeclaration(String name, Expression initializer) {
+        this(name, Optional.empty(), Optional.of(initializer));
     }
 }
 record DataDefinition(

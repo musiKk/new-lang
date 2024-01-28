@@ -174,6 +174,7 @@ public class Tokenizer {
         }
     }
     enum TokenType {
+        IMPORT("import"),
         DATA("data"),
         DEF("def"),
         VAR("var"),

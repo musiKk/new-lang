@@ -63,7 +63,7 @@ public class Runner {
                     } else {
                         throw new RuntimeException("cannot look up fields in values " + receiver);
                     }
-                }).orElse(frame.getVariable(ve.name()));
+                }).orElse(frame.getVariable(ve.name()).value());
             }
             case FunctionEvaluationExpression fe -> {
                 var functionName = fe.name();
@@ -80,7 +80,8 @@ public class Runner {
                 for (int i = 0; i < fe.arguments().size(); i++) {
                     var argument = fe.arguments().get(i);
                     var value = evaluateExpression(argument, frame);
-                    newStackFrame.putVariable(parameters.get(i).name(), value);
+                    var name = parameters.get(i).name();
+                    newStackFrame.putVariable(name, new Variable(name, value));
                 }
                 if (nativeFunctions.containsKey(functionName)) {
                     var nativeFunction = nativeFunctions.get(functionName);
@@ -104,6 +105,11 @@ public class Runner {
     private Value execute(Statement expression, StackFrame frame) {
         return switch (expression) {
             case ExpressionStatement(Expression e) -> evaluateExpression(e, frame);
+            case VariableDeclaration vds -> {
+                var optValue = vds.initializer().map(initializer -> evaluateExpression(initializer, frame));
+                frame.putVariable(vds.name(), new Variable(vds.name(), optValue.orElse(null)));
+                yield null;
+            }
             default -> throw new RuntimeException("not yet implemented " + expression);
         };
     }
@@ -167,14 +173,14 @@ public class Runner {
     }
 
     static class RuntimeFile {
-        private Map<String, Value> variables = new HashMap<>();
+        private Map<String, Variable> variables = new HashMap<>();
         private Map<String, Function> functions = new HashMap<>();
         private Map<String, DataDefinition> dataDefinitions = new HashMap<>();
     }
 
     interface StackFrame {
-        Value getVariable(String name);
-        void putVariable(String name, Value value);
+        Variable getVariable(String name);
+        void putVariable(String name, Variable variable);
         StackFrame pushFrame();
     }
 
@@ -187,17 +193,17 @@ public class Runner {
             return new DefaultStackFrame(this);
         }
         @Override
-        public Value getVariable(String name) {
+        public Variable getVariable(String name) {
             return runtimeFile.variables.get(name);
         }
         @Override
-        public void putVariable(String name, Value value) {
-            runtimeFile.variables.put(name, value);
+        public void putVariable(String name, Variable variable) {
+            runtimeFile.variables.put(name, variable);
         }
     }
 
     record DefaultStackFrame(
-        Map<String, Value> variables,
+        Map<String, Variable> variables,
         StackFrame parent
     ) implements StackFrame {
         DefaultStackFrame() {
@@ -211,38 +217,61 @@ public class Runner {
             return new DefaultStackFrame(this);
         }
         @Override
-        public Value getVariable(String name) {
+        public Variable getVariable(String name) {
             return variables.get(name);
         }
         @Override
-        public void putVariable(String name, Value value) {
-            variables.put(name, value);
+        public void putVariable(String name, Variable variable) {
+            variables.put(name, variable);
         }
     }
 
     interface Value {
+        Type type();
     }
 
-    record NumberValue(int number) implements Value {}
-    record StringValue(String string) implements Value {}
-    record DataValue(String typeName, Map<String, Value> fields) implements Value {}
+    record NumberValue(int number) implements Value {
+        public Type type() {
+            return Type.NUMBER;
+        }
+    }
+    record StringValue(String string) implements Value {
+        public Type type() {
+            return Type.STRING;
+        }
+    }
+    record DataValue(String typeName, Map<String, Value> fields) implements Value {
+        public Type type() {
+            return Type.DATA;
+        }
+    }
     record Function(String name, List<Parameter> parameters, Expression body) implements Value {
         static Function of(FunctionDeclaration functionDeclaration) {
             var parameters = new ArrayList<Parameter>();
             for (var varDecl : functionDeclaration.parameters()) {
-                new Parameter(varDecl.name(), Type.of(varDecl.type()), varDecl.initializer());
+                new Parameter(varDecl.name(), Type.of(varDecl.type().get()), varDecl.initializer());
             }
             return new Function(
                 functionDeclaration.name(),
                 parameters,
                 functionDeclaration.body());
         }
+        public Type type() {
+            return Type.FUNCTION;
+        }
+    }
+
+    record Variable(String name, Type type, Value value) {
+        public Variable(String name, Value value) {
+            this(name, value.type(), value);
+        }
     }
 
     enum Type {
         NUMBER,
         STRING,
-        DATA;
+        DATA,
+        FUNCTION;
         static Type of(String descriptor) {
             return switch (descriptor) {
                 case "Int" -> NUMBER;
@@ -266,7 +295,7 @@ public class Runner {
         @Override
         public Value call(StackFrame stackFrame) {
             var args = stackFrame.getVariable("args");
-            String representation = switch (args) {
+            String representation = switch (args.value()) {
                 case null -> "null";
                 case NumberValue nv -> String.valueOf(nv.number());
                 case StringValue sv -> sv.string();
