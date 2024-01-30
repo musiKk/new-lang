@@ -115,7 +115,12 @@ public class Runner {
 
     private Value execute(Statement expression, StackFrame frame) {
         return switch (expression) {
-            case ExpressionStatement(Expression e) -> evaluateExpression(e, frame);
+            /*
+             * This should be
+             *     case ExpressionStatement(Expression e) -> evaluateExpression(e, frame);
+             * but record pattern matching is thwarted by this bug: https://github.com/redhat-developer/vscode-java/issues/3479
+             */
+            case ExpressionStatement es -> evaluateExpression(es.expression(), frame);
             case VariableDeclaration vds -> {
                 var optValue = vds.initializer().map(initializer -> evaluateExpression(initializer, frame));
                 frame.putVariable(vds.name(), new Variable(vds.name(), optValue.orElse(null)));
