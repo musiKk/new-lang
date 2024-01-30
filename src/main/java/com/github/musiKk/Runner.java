@@ -146,7 +146,7 @@ public class Runner {
                     if (statement instanceof DataDefinition dataDefinition) {
                         result.addDataDefinition(dataDefinition);
                     } else if (statement instanceof FunctionDeclaration functionDeclaration) {
-                        result.addFunction(Function.of(functionDeclaration, frame.scope()));
+                        result.addFunction(Function.of(functionDeclaration, runtimeFile.scope()));
                     } else {
                         result.addStatement(statement);
                     }
