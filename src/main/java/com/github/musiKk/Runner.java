@@ -32,12 +32,11 @@ public class Runner {
 
     private RuntimeFile getOrInitRuntimeFile(String pathString, StackFrame frame) {
         var path = Path.of(pathString);
-        var rf = runtimeFiles.computeIfAbsent(path, __ -> {
+        if (!runtimeFiles.containsKey(path)) {
             var runtimeFile = initRuntimeFile(path, frame.pushFrame(new DefaultScope()));
-            return runtimeFile;
-        });
-        runtimeFiles.put(path, rf);
-        return rf;
+            runtimeFiles.put(path, runtimeFile);
+        }
+        return runtimeFiles.get(path);
     }
 
     private void execute(List<Statement> statements, StackFrame frame) {
