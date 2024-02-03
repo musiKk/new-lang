@@ -16,7 +16,7 @@ public class Runner {
     Map<String, NativeFunction> nativeFunctions = new HashMap<>();
 
     {
-        nativeFunctions.put("print", new PrintFunction());
+        nativeFunctions.put("_print", new PrintFunction());
     }
 
     public static void main(String[] args) {

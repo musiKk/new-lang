@@ -1,10 +1,12 @@
+import io
+
 def main() = {
     print("hello world")
     print(x)
     foo(1337)
 }
 
-def foo(i: int) = {
+def foo(i: Int) = {
     print("hello from foo")
     print(i)
 }

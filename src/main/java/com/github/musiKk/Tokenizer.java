@@ -110,9 +110,9 @@ public class Tokenizer {
     static class IdentifierPattern implements Pattern {
         @Override
         public Optional<Token> match(String programString, int index) {
-            if (Character.isLetter(programString.charAt(index))) {
+            if (Character.isJavaIdentifierStart(programString.charAt(index))) {
                 int start = index;
-                while (index < programString.length() && Character.isLetterOrDigit(programString.charAt(index))) {
+                while (index < programString.length() && Character.isJavaIdentifierPart(programString.charAt(index))) {
                     index++;
                 }
                 return Optional.of(new Token(TokenType.IDENTIFIER, programString.substring(start, index), start, index));
