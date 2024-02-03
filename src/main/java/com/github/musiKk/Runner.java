@@ -103,16 +103,12 @@ public class Runner {
             newStackFrame.putVariable(name, new Variable(name, value));
         }
 
-        try {
-            if (nativeFunctions.containsKey(functionName)) {
-                var nativeFunction = nativeFunctions.get(functionName);
-                return nativeFunction.call(newStackFrame);
-            }
-            var function = frame.getVariable(functionName).variable.as(Function.class);
-            return evaluateExpression(function.body(), newStackFrame);
-        } finally {
-            frame.scope().clearImports();
+        if (nativeFunctions.containsKey(functionName)) {
+            var nativeFunction = nativeFunctions.get(functionName);
+            return nativeFunction.call(newStackFrame);
         }
+        var function = frame.getVariable(functionName).variable.as(Function.class);
+        return evaluateExpression(function.body(), newStackFrame);
     }
 
     private Value execute(Statement expression, StackFrame frame) {
@@ -223,15 +219,16 @@ public class Runner {
             }
 
             for (var importedScope : importedScopes.values()) {
-                var variable = importedScope.getVariable(name);
-                if (variable != null) {
-                    return variable;
+                try {
+                    return importedScope.getVariable(name);
+                } catch (SymbolNotFoundException e) {
+                    // ignore, we have to check parents first
                 }
             }
             if (parent != null) {
                 return parent.getVariable(name);
             } else {
-                throw new RuntimeException("symbol " + name + " not found");
+                throw new SymbolNotFoundException("symbol " + name + " not found");
             }
         }
         @Override
@@ -242,17 +239,12 @@ public class Runner {
         public void addImportScope(String name, Scope scope) {
             importedScopes.put(name, scope);
         }
-        @Override
-        public void clearImports() {
-            importedScopes.clear();
-        }
     }
 
     interface Scope {
         ScopedVariable getVariable(String name);
         void putVariable(String name, Variable variable);
         void addImportScope(String name, Scope scope);
-        void clearImports();
     }
 
     record ScopedVariable(Variable variable, Scope scope) {}
@@ -384,6 +376,12 @@ public class Runner {
         }
         public Scope scope() {
             return new DefaultScope();
+        }
+    }
+
+    static class SymbolNotFoundException extends RuntimeException {
+        public SymbolNotFoundException(String message) {
+            super(message);
         }
     }
 }
