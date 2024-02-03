@@ -41,7 +41,7 @@ public class Parser {
 
     private Import parseImportStatement(Tokens tokens) {
         tokens.next(TokenType.IMPORT);
-        var nameToken = tokens.next(TokenType.STRING);
+        var nameToken = tokens.next(TokenType.IDENTIFIER);
         return new Import(nameToken.image());
     }
 
@@ -85,11 +85,10 @@ public class Parser {
         List<VariableDeclaration> parameters = new ArrayList<>();
         tokens.next(TokenType.LPAREN);
         var maybeParameter = tokens.peek();
-        if (maybeParameter.type() != TokenType.RPAREN) {
+        if (!tokens.matches(TokenType.RPAREN)) {
             var variableDeclaration = parseVariableDeclaration(tokens);
             parameters.add(variableDeclaration);
-            tokens.next(TokenType.COMMA);
-            while (true) {
+            while (tokens.matches(TokenType.COMMA)) {
                 maybeParameter = tokens.peek();
                 if (maybeParameter.type() == TokenType.RPAREN) {
                     tokens.next();
@@ -312,6 +311,12 @@ public class Parser {
             ));
         testCases.add(new StatementTestCase(
             "var x = 1", new VariableDeclaration("x", new NumberExpression(1))));
+        testCases.add(new StatementTestCase(
+            "def foo() = {}",
+            new FunctionDeclaration(StandaloneFunctionReceiver.get(), "foo", List.of(), "void", new BlockExpression(List.of()))));
+        testCases.add(new StatementTestCase(
+            "def foo(i) = {}",
+            new FunctionDeclaration(StandaloneFunctionReceiver.get(), "foo", List.of(new VariableDeclaration("i")), "void", new BlockExpression(List.of()))));
         testCases.add(new ExpressionTestCase(
             "foo()",
             new FunctionEvaluationExpression("foo", List.of())));
@@ -474,6 +479,9 @@ record VariableDeclaration(
     Optional<String> type,
     Optional<Expression> initializer
 ) implements Statement {
+    public VariableDeclaration(String name) {
+        this(name, Optional.empty(), Optional.empty());
+    }
     public VariableDeclaration(String name, Optional<String> type) {
         this(name, type, Optional.empty());
     }

@@ -3,9 +3,7 @@ package com.github.musiKk;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -68,49 +66,54 @@ public class Runner {
                 }).orElse(frame.getVariable(ve.name()).variable.value());
             }
             case FunctionEvaluationExpression fe -> {
-                var functionName = fe.name();
-                final Scope functionScope;
-
-                List<Parameter> parameters;
-                if (nativeFunctions.containsKey(functionName)) {
-                    var nativeFunction = nativeFunctions.get(functionName);
-                    functionScope = nativeFunction.scope();
-                    parameters = nativeFunction.parameters();
-                } else {
-                    // TODO look up function in avalable symbols
-                    // parameters = runtimeFiles.get(fe.name()).functions.get(fe.name()).parameters();
-                    throw new RuntimeException("user defined functions not supported yet");
-                }
-
-                var newStackFrame = frame.pushFrame(functionScope);
-                for (int i = 0; i < fe.arguments().size(); i++) {
-                    var argument = fe.arguments().get(i);
-                    var value = evaluateExpression(argument, frame);
-                    var name = parameters.get(i).name();
-                    newStackFrame.putVariable(name, new Variable(name, value));
-                }
-                if (nativeFunctions.containsKey(functionName)) {
-                    var nativeFunction = nativeFunctions.get(functionName);
-                    yield nativeFunction.call(newStackFrame);
-                }
-                throw new RuntimeException("user defined functions not supported yet");
-                // var function = runtimeFiles.get(fe.name()).symbols.get(fe.name());
-                // if (function.type != Type.FUNCTION) {
-                //     throw new RuntimeException("cannot call non-function " + function);
-                // }
-                // yield evaluateExpression(function.as(Function.class).body(), newStackFrame);
+                yield evaluateFunction(fe, frame);
             }
             case BlockExpression be -> {
-                frame.pushScope();
+                var blockFrame = frame.pushScope();
                 Value result = null;
                 for (var statement : be.statements()) {
-                    result = execute(statement, frame);
+                    result = execute(statement, blockFrame);
                 }
                 frame.popScope();
                 yield result;
             }
             default -> throw new RuntimeException("not yet implemented " + expression);
         };
+    }
+
+    private Value evaluateFunction(FunctionEvaluationExpression fe, StackFrame frame) {
+        var functionName = fe.name();
+        final Scope functionScope;
+
+        List<Parameter> parameters;
+        if (nativeFunctions.containsKey(functionName)) {
+            var nativeFunction = nativeFunctions.get(functionName);
+            functionScope = nativeFunction.scope();
+            parameters = nativeFunction.parameters();
+        } else {
+            var function = frame.getVariable(functionName).variable.as(Function.class);
+            functionScope = function.scope();
+            parameters = function.parameters();
+        }
+
+        var newStackFrame = frame.pushFrame(functionScope);
+        for (int i = 0; i < fe.arguments().size(); i++) {
+            var argument = fe.arguments().get(i);
+            var value = evaluateExpression(argument, frame);
+            var name = parameters.get(i).name();
+            newStackFrame.putVariable(name, new Variable(name, value));
+        }
+
+        try {
+            if (nativeFunctions.containsKey(functionName)) {
+                var nativeFunction = nativeFunctions.get(functionName);
+                return nativeFunction.call(newStackFrame);
+            }
+            var function = frame.getVariable(functionName).variable.as(Function.class);
+            return evaluateExpression(function.body(), newStackFrame);
+        } finally {
+            frame.scope().clearImports();
+        }
     }
 
     private Value execute(Statement expression, StackFrame frame) {
@@ -126,8 +129,17 @@ public class Runner {
                 frame.putVariable(vds.name(), new Variable(vds.name(), optValue.orElse(null)));
                 yield null;
             }
+            case Import imp -> {
+                processImport(imp, frame);
+                yield null;
+            }
             default -> throw new RuntimeException("not yet implemented " + expression);
         };
+    }
+
+    private void processImport(Import imp, StackFrame frame) {
+        var runtimeFile = getOrInitRuntimeFile(imp.name() + ".tst", frame);
+        frame.scope().addImportScope(imp.name(), runtimeFile.scope);
     }
 
     private RuntimeFile initRuntimeFile(Path path, StackFrame frame) {
@@ -198,18 +210,26 @@ public class Runner {
         }
     }
 
-    record DefaultScope(Map<String, Variable> variables, Scope parent) implements Scope {
+    record DefaultScope(Map<String, Variable> variables, Scope parent, Map<String, Scope> importedScopes) implements Scope {
         DefaultScope() {
-            this(new HashMap<>(), null);
+            this(new HashMap<>(), null, new HashMap<>());
         }
         DefaultScope(Scope parent) {
-            this(new HashMap<>(), parent);
+            this(new HashMap<>(), parent, new HashMap<>());
         }
         @Override
         public ScopedVariable getVariable(String name) {
             if (variables.containsKey(name)) {
                 return new ScopedVariable(variables.get(name), this);
-            } else if (parent != null) {
+            }
+
+            for (var importedScope : importedScopes.values()) {
+                var variable = importedScope.getVariable(name);
+                if (variable != null) {
+                    return variable;
+                }
+            }
+            if (parent != null) {
                 return parent.getVariable(name);
             } else {
                 throw new RuntimeException("symbol " + name + " not found");
@@ -220,62 +240,58 @@ public class Runner {
             variables.put(name, variable);
         }
         @Override
-        public Scope pushScope() {
-            return new DefaultScope(this);
+        public void addImportScope(String name, Scope scope) {
+            importedScopes.put(name, scope);
         }
         @Override
-        public Scope pushScope(Scope scope) {
-            return new DefaultScope(scope);
+        public void clearImports() {
+            importedScopes.clear();
         }
     }
 
     interface Scope {
         ScopedVariable getVariable(String name);
         void putVariable(String name, Variable variable);
-        Scope pushScope();
-        Scope pushScope(Scope scope);
+        void addImportScope(String name, Scope scope);
+        void clearImports();
     }
 
     record ScopedVariable(Variable variable, Scope scope) {}
 
     record StackFrame(
         StackFrame parent,
-        Deque<Scope> scopes
+        Scope scope
     ) {
         /**
          * The stack frame that runs the program does not have a scope and thus
          * cannot hold any symbols.
          */
-
         public StackFrame() {
-            this(null, new ArrayDeque<>());
+            this(null, null);
         }
-        // pushes a frame with a new scope
+        /**
+         * Pushes a frame with a new scope when running a new function. The
+         * scope passed is the scope of the function definition.
+         */
         public StackFrame pushFrame(Scope scope) {
-            var newScopes = new ArrayDeque<Scope>();
-            newScopes.addFirst(scope);
-            return new StackFrame(this, newScopes);
+            return new StackFrame(this, scope);
         }
-        public Scope scope() {
-            return scopes.peek();
+        public StackFrame pushScope() {
+            var newScope = new DefaultScope(scope);
+            return new StackFrame(this, newScope);
         }
-        public Scope pushScope() {
-            var newScope = scope().pushScope();
-            scopes.push(newScope);
-            return newScope;
-        }
-        public void popScope() {
-            scopes.pop();
+        public StackFrame popScope() {
+            return parent;
         }
 
         // convenience methods that pass through to the scope; not sure if they are needed
         @Deprecated
         public ScopedVariable getVariable(String name) {
-            return scopes.peek().getVariable(name);
+            return scope.getVariable(name);
         }
         @Deprecated
         public void putVariable(String name, Variable variable) {
-            scopes.peek().putVariable(name, variable);
+            scope.putVariable(name, variable);
         }
     }
 
@@ -300,10 +316,9 @@ public class Runner {
     }
     record Function(String name, List<Parameter> parameters, Expression body, Scope scope) implements Value {
         static Function of(FunctionDeclaration functionDeclaration, Scope scope) {
-            var parameters = new ArrayList<Parameter>();
-            for (var varDecl : functionDeclaration.parameters()) {
-                new Parameter(varDecl.name(), Type.of(varDecl.type().get()), varDecl.initializer());
-            }
+            var parameters = functionDeclaration.parameters().stream()
+                    .map(varDecl -> new Parameter(varDecl.name(), Type.of(varDecl.type().get()), varDecl.initializer()))
+                    .toList();
             return new Function(
                 functionDeclaration.name(),
                 parameters,
