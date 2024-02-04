@@ -134,7 +134,33 @@ public class Parser {
     }
 
     private Expression parseExpression(Tokens tokens) {
-        return parsePlus(tokens);
+        return parseAssignment(tokens);
+    }
+
+    private Expression parseAssignment(Tokens tokens) {
+        var expr = parseEquality(tokens);
+
+        if (tokens.matches(TokenType.EQUALS)) {
+            if (expr instanceof VariableExpression ve) {
+                tokens.next();
+                var right = parseAssignment(tokens);
+                expr = new AssignmentExpression(ve, right);
+            } else {
+                throw new RuntimeException("Left-hand side of assignment must be a variable");
+            }
+        }
+        return expr;
+    }
+
+    private Expression parseEquality(Tokens tokens) {
+        var expr = parsePlus(tokens);
+
+        while (tokens.matches(TokenType.EQUALS_EQUALS, TokenType.NOT_EQUALS)) {
+            var operator = tokens.next().type();
+            var right = parsePlus(tokens);
+            expr = new BinaryExpression(expr, operator, right);
+        }
+        return expr;
     }
 
     private Expression parsePlus(Tokens tokens) {
@@ -199,23 +225,6 @@ public class Parser {
         } else {
             return expression;
         }
-
-
-        // if (token.type() == TokenType.IDENTIFIER) {
-        //     return parseNameExpression(tokens);
-        // } else if (token.type() == TokenType.NUMBER) {
-        //     var numberToken = tokens.next();
-        //     return new NumberExpression(Integer.parseInt(numberToken.image()));
-        // } else if (token.type() == TokenType.VAR) {
-        //     tokens.next();
-        //     var variableDeclaration = parseVariableDeclaration(tokens);
-        //     return new VariableExpression(Optional.empty(), variableDeclaration.name());
-        // } else if (token.type() == TokenType.LBRACE) {
-        //     var expression = parseBlockExpression(tokens);
-        //     return expression;
-        // } else {
-        //     throw new RuntimeException("Unexpected token: " + token);
-        // }
     }
 
     // <> name
@@ -359,6 +368,20 @@ public class Parser {
         testCases.add(new ExpressionTestCase(
             "a.b.c",
             new VariableExpression(Optional.of(new VariableExpression( Optional.of(new VariableExpression("a")), "b")), "c")));
+        testCases.add(new ExpressionTestCase(
+            "a = b",
+            new BinaryExpression(new VariableExpression("a"), TokenType.EQUALS, new VariableExpression("b"))));
+        testCases.add(new ExpressionTestCase(
+            "a.b = c",
+            new BinaryExpression(new VariableExpression(Optional.of(new VariableExpression("a")), "b"), TokenType.EQUALS, new VariableExpression("c"))));
+        testCases.add(new ExpressionTestCase(
+            "a = b == c", new BinaryExpression(
+                new VariableExpression("a"),
+                TokenType.EQUALS,
+                new BinaryExpression(
+                    new VariableExpression("b"),
+                    TokenType.EQUALS_EQUALS,
+                    new VariableExpression("c")))));
 
         for (var testCase : testCases) {
             System.err.printf("%-30s", testCase.input());
@@ -415,6 +438,7 @@ record ExpressionStatement(
 ) implements Statement {}
 
 sealed interface Expression permits
+    AssignmentExpression,
     BlockExpression,
     NumberExpression,
     StringExpression,
@@ -422,6 +446,10 @@ sealed interface Expression permits
     FunctionEvaluationExpression,
     BinaryExpression
 {}
+record AssignmentExpression(
+    VariableExpression target,
+    Expression value
+) implements Expression {}
 record BlockExpression(
     List<Statement> statements
 ) implements Expression {}

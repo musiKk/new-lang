@@ -178,6 +178,7 @@ public class Tokenizer {
         NUMBER,
         STRING,
 
+        EQUALS_EQUALS("=="), NOT_EQUALS("!="),
         PLUS("+"), MINUS("-"),
         STAR("*"), SLASH("/"),
 
