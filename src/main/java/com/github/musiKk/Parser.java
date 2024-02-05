@@ -200,70 +200,35 @@ public class Parser {
                 var stringToken = tokens.next();
                 yield new StringExpression(stringToken.image());
             }
-            case VAR -> {
-                tokens.next();
-                var variableDeclaration = parseVariableDeclaration(tokens);
-                yield new VariableExpression(Optional.empty(), variableDeclaration.name());
-            }
             case LBRACE -> parseBlockExpression(tokens);
             default -> throw new RuntimeException("Unexpected token: " + token);
         };
 
-        token = tokens.peek();
-        if (token.type() == TokenType.DOT) {
+        while (tokens.matches(TokenType.DOT)) {
             tokens.next();
-            var invocation = parseExpression(tokens);
-            switch (invocation) {
+            var invocation = parseNameExpression(tokens);
+            expression = switch (invocation) {
                 case VariableExpression ve -> {
-                    return new VariableExpression(Optional.of(expression), ve.name());
+                    yield new VariableExpression(expression, ve.name());
                 }
                 case FunctionEvaluationExpression fee -> {
-                    return new FunctionEvaluationExpression(Optional.of(expression), fee.name(), fee.arguments());
+                    yield new FunctionEvaluationExpression(expression, fee.name(), fee.arguments());
                 }
-                default -> throw new RuntimeException("Unexpected token: " + token);
-            }
-        } else {
-            return expression;
+                default -> throw new RuntimeException("Unexpected parse: " + invocation);
+            };
         }
+        return expression;
     }
 
-    // <> name
     private Expression parseNameExpression(Tokens tokens) {
         var nameToken = tokens.next(TokenType.IDENTIFIER);
         var token = tokens.peek();
 
         return switch (token.type()) {
             case LPAREN -> parseFunctionEvaluationExpression(tokens, nameToken.image(), Optional.empty());
-            case DOT -> parseDottedExpression(tokens, new VariableExpression(Optional.empty(), nameToken.image()));
             default -> new VariableExpression(Optional.empty(), nameToken.image());
         };
     }
-
-    // expression <> .
-    private Expression parseDottedExpression(Tokens tokens, Expression expression) {
-        tokens.next(TokenType.DOT);
-
-        var memberNameToken = tokens.next(TokenType.IDENTIFIER);
-
-        var maybeParen = tokens.peek();
-        return switch (maybeParen.type()) {
-            case LPAREN -> parseFunctionEvaluationExpression(tokens, memberNameToken.image(), Optional.of(expression));
-            default -> new VariableExpression(Optional.of(expression), memberNameToken.image());
-        };
-    }
-
-    // name . <>
-    // private Expression parseDottedExpression(Tokens tokens, Token nameToken) {
-    //     tokens.next(TokenType.DOT);
-
-    //     var memberNameToken = tokens.next(TokenType.IDENTIFIER);
-
-    //     var token = tokens.peek();
-    //     return switch (token.type()) {
-    //         case LPAREN -> parseFunctionEvaluationExpression(tokens, memberNameToken.image(), Optional.of(new VariableExpression(nameToken.image())));
-    //         default -> new VariableExpression(Optional.of(nameToken.image()), memberNameToken.image());
-    //     };
-    // }
 
     // target? .? name <>
     private FunctionEvaluationExpression parseFunctionEvaluationExpression(Tokens tokens, String name, Optional<Expression> target) {
@@ -337,10 +302,10 @@ public class Parser {
             new FunctionEvaluationExpression("foo", List.of(new StringExpression("foo")))));
         testCases.add(new ExpressionTestCase(
             "foo.bar",
-            new VariableExpression(Optional.of(new VariableExpression("foo")), "bar")));
+            new VariableExpression(new VariableExpression("foo"), "bar")));
         testCases.add(new ExpressionTestCase(
             "foo.bar()",
-            new FunctionEvaluationExpression(Optional.of(new VariableExpression("foo")), "bar", List.of())));
+            new FunctionEvaluationExpression(new VariableExpression("foo"), "bar", List.of())));
         testCases.add(new ExpressionTestCase(
             "a + b",
             new BinaryExpression(new VariableExpression("a"), TokenType.PLUS, new VariableExpression("b"))));
@@ -358,26 +323,37 @@ public class Parser {
             new BinaryExpression(
                 new VariableExpression("a"),
                 TokenType.PLUS,
-                new VariableExpression(Optional.of(new VariableExpression("b")), "c"))));
+                new VariableExpression(new VariableExpression("b"), "c"))));
         testCases.add(new ExpressionTestCase(
             "a + b.c()",
             new BinaryExpression(
                 new VariableExpression("a"),
                 TokenType.PLUS,
-                new FunctionEvaluationExpression(Optional.of(new VariableExpression("b")), "c", List.of()))));
+                new FunctionEvaluationExpression(new VariableExpression("b"), "c", List.of()))));
+        testCases.add(new ExpressionTestCase(
+            "b.c() + a",
+            new BinaryExpression(
+                new FunctionEvaluationExpression(new VariableExpression("b"), "c", List.of()),
+                TokenType.PLUS,
+                new VariableExpression("a"))));
+        testCases.add(new ExpressionTestCase(
+            "a.b().c.d()",
+            new FunctionEvaluationExpression(
+                new VariableExpression(new FunctionEvaluationExpression(new VariableExpression("a"), "b", List.of()), "c"),
+                "d",
+                List.of())));
         testCases.add(new ExpressionTestCase(
             "a.b.c",
-            new VariableExpression(Optional.of(new VariableExpression( Optional.of(new VariableExpression("a")), "b")), "c")));
+            new VariableExpression(new VariableExpression(new VariableExpression("a"), "b"), "c")));
         testCases.add(new ExpressionTestCase(
             "a = b",
-            new BinaryExpression(new VariableExpression("a"), TokenType.EQUALS, new VariableExpression("b"))));
+            new AssignmentExpression(new VariableExpression("a"), new VariableExpression("b"))));
         testCases.add(new ExpressionTestCase(
             "a.b = c",
-            new BinaryExpression(new VariableExpression(Optional.of(new VariableExpression("a")), "b"), TokenType.EQUALS, new VariableExpression("c"))));
+            new AssignmentExpression(new VariableExpression(new VariableExpression("a"), "b"), new VariableExpression("c"))));
         testCases.add(new ExpressionTestCase(
-            "a = b == c", new BinaryExpression(
+            "a = b == c", new AssignmentExpression(
                 new VariableExpression("a"),
-                TokenType.EQUALS,
                 new BinaryExpression(
                     new VariableExpression("b"),
                     TokenType.EQUALS_EQUALS,
@@ -387,7 +363,14 @@ public class Parser {
             System.err.printf("%-30s", testCase.input());
 
             var tokens = new Tokenizer().tokenize(testCase.input());
-            var result = testCase.parseFn().apply(p, tokens);
+            Object result;
+            try {
+                result = testCase.parseFn().apply(p, tokens);
+            } catch (Exception e) {
+                System.err.println("FAIL");
+                e.printStackTrace();
+                continue;
+            }
             if (!result.equals(testCase.expected())) {
                 System.err.println("FAIL");
                 System.err.println("got:      " + result);
@@ -466,6 +449,9 @@ record VariableExpression(
     public VariableExpression(String name) {
         this(Optional.empty(), name);
     }
+    public VariableExpression(Expression target, String name) {
+        this(Optional.of(target), name);
+    }
 }
 record BinaryExpression(
     Expression left,
@@ -480,6 +466,9 @@ record FunctionEvaluationExpression(
 ) implements Expression {
     public FunctionEvaluationExpression(String name, List<Expression> arguments) {
         this(Optional.empty(), name, arguments);
+    }
+    public FunctionEvaluationExpression(Expression target, String name, List<Expression> arguments) {
+        this(Optional.of(target), name, arguments);
     }
 }
 
