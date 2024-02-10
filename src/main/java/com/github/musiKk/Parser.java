@@ -76,8 +76,8 @@ public class Parser {
         FunctionReceiverType receiver;
         if (tokens.peek().type() == TokenType.DOT) {
             tokens.next();
-            var receiverToken = tokens.next(TokenType.IDENTIFIER);
-            receiver = new FunctionReceiverVariable(receiverToken.image());
+            receiver = new FunctionReceiverVariable(nameToken.image());
+            nameToken = tokens.next(TokenType.IDENTIFIER);
         } else {
             receiver = StandaloneFunctionReceiver.get();
         }
@@ -291,6 +291,9 @@ public class Parser {
         testCases.add(new StatementTestCase(
             "def foo(i) = {}",
             new FunctionDeclaration(StandaloneFunctionReceiver.get(), "foo", List.of(new VariableDeclaration("i")), "void", new BlockExpression(List.of()))));
+        testCases.add(new StatementTestCase(
+            "def Foo.foo() = {}",
+            new FunctionDeclaration(new FunctionReceiverVariable("Foo"), "foo", List.of(), "void", new BlockExpression(List.of()))));
         testCases.add(new ExpressionTestCase(
             "foo()",
             new FunctionEvaluationExpression("foo", List.of())));
