@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import com.github.musiKk.Tokenizer.TokenType;
+
 public class Runner {
 
     Map<Path, RuntimeFile> runtimeFiles = new HashMap<>();
@@ -75,6 +77,17 @@ public class Runner {
                 }
                 frame.popScope();
                 yield result;
+            }
+            case BinaryExpression be -> {
+                var left = (NumberValue) evaluateExpression(be.left(), frame);
+                var right = (NumberValue) evaluateExpression(be.right(), frame);
+                yield switch (be.operator()) {
+                    case TokenType.PLUS -> new NumberValue(left.number() + right.number());
+                    case TokenType.MINUS -> new NumberValue(left.number() - right.number());
+                    case TokenType.STAR -> new NumberValue(left.number() * right.number());
+                    case TokenType.SLASH -> new NumberValue(left.number() / right.number());
+                    default -> throw new RuntimeException("not yet implemented " + be.operator());
+                };
             }
             default -> throw new RuntimeException("not yet implemented " + expression);
         };

@@ -358,6 +358,11 @@ public class Parser {
                     new VariableExpression("b"),
                     TokenType.EQUALS_EQUALS,
                     new VariableExpression("c")))));
+        testCases.add(new ExpressionTestCase("a = b = c", new AssignmentExpression(
+            new VariableExpression("a"),
+            new AssignmentExpression(
+                new VariableExpression("b"),
+                new VariableExpression("c")))));
 
         for (var testCase : testCases) {
             System.err.printf("%-30s", testCase.input());
