@@ -59,8 +59,8 @@ public class Runner {
                 var optTarget = ve.target();
                 Optional<Value> optReceiver = optTarget.map(t -> evaluateExpression(t, frame));
                 yield optReceiver.map(receiver -> {
-                    if (receiver instanceof DataValue dv) {
-                        return dv.fields().get(ve.name());
+                    if (receiver instanceof Data dv) {
+                        return dv.variables().get(ve.name());
                     } else {
                         throw new RuntimeException("cannot look up fields in values " + receiver);
                     }
@@ -103,9 +103,17 @@ public class Runner {
             functionScope = nativeFunction.scope();
             parameters = nativeFunction.parameters();
         } else {
-            var function = frame.getVariable(functionName).variable.as(Function.class);
-            functionScope = function.scope();
-            parameters = function.parameters();
+            switch (frame.getVariable(functionName).variable.value) {
+                case Function function -> {
+                    functionScope = function.scope();
+                    parameters = function.parameters();
+                }
+                case DataCreationFunction dataCreationFunction -> {
+                    functionScope = dataCreationFunction.scope();
+                    parameters = dataCreationFunction.parameters();
+                }
+                default -> throw new RuntimeException("not a function " + functionName);
+            }
         }
 
         var newStackFrame = frame.pushFrame(functionScope);
@@ -120,8 +128,25 @@ public class Runner {
             var nativeFunction = nativeFunctions.get(functionName);
             return nativeFunction.call(newStackFrame);
         }
-        var function = frame.getVariable(functionName).variable.as(Function.class);
-        return evaluateExpression(function.body(), newStackFrame);
+
+        return switch (frame.getVariable(functionName).variable.value) {
+            case DataCreationFunction dataCreationFunction -> {
+                yield createData(dataCreationFunction, newStackFrame);
+            }
+            case Function function -> {
+                yield evaluateExpression(function.body(), newStackFrame);
+            }
+            default -> throw new RuntimeException("not a function " + functionName);
+        };
+    }
+
+    private Data createData(DataCreationFunction dataCreationFunction, StackFrame frame) {
+        Map<String, Value> variables = new HashMap<>();
+        dataCreationFunction.parameters().forEach(parameter -> {
+            var val = frame.getVariable(parameter.name()).variable.value;
+            variables.put(parameter.name(), val);
+        });
+        return new Data(dataCreationFunction.name(), variables);
     }
 
     private Value execute(Statement expression, StackFrame frame) {
@@ -139,6 +164,10 @@ public class Runner {
             }
             case Import imp -> {
                 processImport(imp, frame);
+                yield null;
+            }
+            case DataDefinition dd -> {
+                processDataDefinition(dd, frame.scope);
                 yield null;
             }
             default -> throw new RuntimeException("not yet implemented " + expression);
@@ -159,7 +188,7 @@ public class Runner {
         }
         var compilationUnit = new Parser().parseCompilationUnit(new Tokenizer().tokenize(fileContent));
 
-        RuntimeFile runtimeFile = new RuntimeFile();
+        RuntimeFile runtimeFile = new RuntimeFile(frame.scope);
 
         var processingResult = compilationUnit.statements().stream()
                 .reduce(new CompilationUnitProcessingResult(), (result, statement) -> {
@@ -179,15 +208,24 @@ public class Runner {
                 });
 
         processingResult.dataDefinitions().forEach((name, dataDefinition) -> {
-            runtimeFile.scope.putVariable(name, new Variable(name, Type.DATA_DEFINITION, new DataValue(name, new HashMap<>())));
+            processDataDefinition(dataDefinition, frame.scope);
         });
         processingResult.functions().forEach((name, function) -> {
-            runtimeFile.scope.putVariable(name, new Variable(name, Type.FUNCTION, function));
+            frame.putVariable(name, new Variable(name, Type.FUNCTION, function));
         });
 
         execute(processingResult.statements(), frame.pushFrame(runtimeFile.scope));
 
         return runtimeFile;
+    }
+
+    static void processDataDefinition(DataDefinition dataDefinition, Scope scope) {
+        scope.putVariable(
+            dataDefinition.name(),
+            new Variable(
+                dataDefinition.name(),
+                Type.DATA_CREATION_FUNCTION,
+                DataCreationFunction.of(dataDefinition, scope)));
     }
 
     record CompilationUnitProcessingResult(
@@ -212,11 +250,7 @@ public class Runner {
         }
     }
 
-    record RuntimeFile(Scope scope) {
-        public RuntimeFile() {
-            this(new DefaultScope());
-        }
-    }
+    record RuntimeFile(Scope scope) {}
 
     record DefaultScope(Map<String, Variable> variables, Scope parent, Map<String, Scope> importedScopes) implements Scope {
         DefaultScope() {
@@ -313,7 +347,7 @@ public class Runner {
             return Type.STRING;
         }
     }
-    record DataValue(String typeName, Map<String, Value> fields) implements Value {
+    record Data(String typeName, Map<String, Value> variables) implements Value {
         public Type type() {
             return Type.DATA;
         }
@@ -333,6 +367,17 @@ public class Runner {
             return Type.FUNCTION;
         }
     }
+    record DataCreationFunction(String name, List<Parameter> parameters, Scope scope) implements Value {
+        static DataCreationFunction of(DataDefinition dataDefinition, Scope scope) {
+            var parameters = dataDefinition.variableDeclarations().stream()
+                    .map(varDecl -> new Parameter(varDecl.name(), Type.of(varDecl.type().get())))
+                    .toList();
+            return new DataCreationFunction(dataDefinition.name(), parameters, scope);
+        }
+        public Type type() {
+            return Type.DATA_CREATION_FUNCTION;
+        }
+    }
 
     record Variable(String name, Type type, Value value) {
         public Variable(String name, Value value) {
@@ -349,6 +394,7 @@ public class Runner {
         STRING,
         DATA,
         DATA_DEFINITION,
+        DATA_CREATION_FUNCTION,
         FUNCTION;
         static Type of(String descriptor) {
             return switch (descriptor) {
@@ -378,7 +424,7 @@ public class Runner {
                 case null -> "null";
                 case NumberValue nv -> String.valueOf(nv.number());
                 case StringValue sv -> sv.string();
-                case DataValue dv -> dv.typeName() + "[...fields...]";
+                case Data dv -> dv.typeName() + "[...fields...]";
                 default -> args.toString();
             };
             System.out.println(representation);
