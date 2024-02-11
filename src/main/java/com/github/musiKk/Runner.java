@@ -89,6 +89,31 @@ public class Runner {
                     default -> throw new RuntimeException("not yet implemented " + be.operator());
                 };
             }
+            case AssignmentExpression ae -> {
+                var lhs = ae.target();
+                var rhs = evaluateExpression(ae.value(), frame);
+                if (lhs.target().isPresent()) {
+                    // XXX causes VerifyError
+                    // switch (evaluateExpression(lhs.target().get(), frame)) {
+                    //     case Data d -> d.variables().put(lhs.name(), rhs);
+                    //     default -> throw new RuntimeException("cannot assign to " + lhs);
+                    // }
+                    var destination = evaluateExpression(lhs.target().get(), frame);
+                    if (destination instanceof Data data) {
+                        data.variables.put(lhs.name(), rhs);
+                    } else {
+                        throw new RuntimeException("cannot assign to " + lhs);
+                    }
+                } else {
+                    try {
+                        ScopedVariable sv = frame.getVariable(lhs.name());
+                        sv.scope.putVariable(lhs.name(), new Variable(lhs.name(), rhs));
+                    } catch (SymbolNotFoundException e) {
+                        frame.putVariable(lhs.name(), new Variable(lhs.name(), rhs));
+                    }
+                }
+                yield rhs;
+            }
             default -> throw new RuntimeException("not yet implemented " + expression);
         };
     }
