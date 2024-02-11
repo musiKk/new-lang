@@ -116,23 +116,24 @@ public class Runner {
 
     private Value evaluateFunction(FunctionEvaluationExpression fe, StackFrame frame) {
         var optTarget = fe.target()
-            .map(target -> evaluateExpression(target, frame));
-        optTarget.ifPresent(target -> {
-            if (!(target instanceof Data)) {
-                throw new RuntimeException("cannot call functions on " + target);
-            }
-        });
+            .map(targetExpression -> {
+                var targetValue = evaluateExpression(targetExpression, frame);
+                if (targetValue instanceof Data data) {
+                    return data;
+                }
+                throw new RuntimeException("cannot call functions on " + targetValue);
+            });
 
-        var functionName = fe.name();
+        var functionLookupName = optTarget.map(t -> t.typeName() + ".").orElse("") + fe.name();
         final Scope functionScope;
 
         List<Parameter> parameters;
-        if (nativeFunctions.containsKey(functionName)) {
-            var nativeFunction = nativeFunctions.get(functionName);
+        if (nativeFunctions.containsKey(functionLookupName)) {
+            var nativeFunction = nativeFunctions.get(functionLookupName);
             functionScope = nativeFunction.scope();
             parameters = nativeFunction.parameters();
         } else {
-            switch (frame.getVariable(functionName).variable.value) {
+            switch (frame.getVariable(functionLookupName).variable.value) {
                 case Function function -> {
                     functionScope = function.scope();
                     parameters = function.parameters();
@@ -141,7 +142,7 @@ public class Runner {
                     functionScope = dataCreationFunction.scope();
                     parameters = dataCreationFunction.parameters();
                 }
-                default -> throw new RuntimeException("not a function " + functionName);
+                default -> throw new RuntimeException("not a function " + functionLookupName);
             }
         }
 
@@ -156,19 +157,19 @@ public class Runner {
             newStackFrame.putVariable(name, new Variable(name, value));
         }
 
-        if (nativeFunctions.containsKey(functionName)) {
-            var nativeFunction = nativeFunctions.get(functionName);
+        if (nativeFunctions.containsKey(functionLookupName)) {
+            var nativeFunction = nativeFunctions.get(functionLookupName);
             return nativeFunction.call(newStackFrame);
         }
 
-        return switch (frame.getVariable(functionName).variable.value) {
+        return switch (frame.getVariable(functionLookupName).variable.value) {
             case DataCreationFunction dataCreationFunction -> {
                 yield createData(dataCreationFunction, newStackFrame);
             }
             case Function function -> {
                 yield evaluateExpression(function.body(), newStackFrame);
             }
-            default -> throw new RuntimeException("not a function " + functionName);
+            default -> throw new RuntimeException("not a function " + functionLookupName);
         };
     }
 
@@ -227,7 +228,7 @@ public class Runner {
                     if (statement instanceof DataDefinition dataDefinition) {
                         result.addDataDefinition(dataDefinition);
                     } else if (statement instanceof FunctionDeclaration functionDeclaration) {
-                        result.addFunction(Function.of(functionDeclaration, runtimeFile.scope()));
+                        result.addFunctionDeclaration(functionDeclaration);
                     } else if (statement instanceof VariableDeclaration variableDeclaration) {
                         result.addVariableDeclaration(variableDeclaration);
                     } else {
@@ -237,7 +238,7 @@ public class Runner {
                 }, (r1, r2) -> {
                     r1.statements.addAll(r2.statements);
                     r1.dataDefinitions.putAll(r2.dataDefinitions);
-                    r1.functions.putAll(r2.functions);
+                    r1.functionDeclarations.putAll(r2.functionDeclarations);
                     r1.variableDeclarations.putAll(r2.variableDeclarations);
                     return r1;
                 });
@@ -245,8 +246,14 @@ public class Runner {
         processingResult.dataDefinitions().forEach((name, dataDefinition) -> {
             processDataDefinition(dataDefinition, frame.scope);
         });
-        processingResult.functions().forEach((name, function) -> {
-            frame.putVariable(name, new Variable(name, Type.FUNCTION, function));
+        processingResult.functionDeclarations().forEach((__, functionDeclaration) -> {
+            var functionName = functionDeclaration.name();
+            var lookupName = switch (functionDeclaration.receiver()) {
+                case FunctionReceiverVariable(String name) -> name + "." + functionName;
+                default -> functionName;
+            };
+            var function = Function.of(functionDeclaration, runtimeFile.scope());
+            frame.putVariable(lookupName, new Variable(functionName, Type.FUNCTION, function));
         });
         processingResult.variableDeclarations().forEach((name, variableDeclaration) -> {
             execute(variableDeclaration, frame);
@@ -270,7 +277,7 @@ public class Runner {
         List<Statement> statements,
         Map<String, DataDefinition> dataDefinitions,
         Map<String, VariableDeclaration> variableDeclarations,
-        Map<String, Function> functions
+        Map<String, FunctionDeclaration> functionDeclarations
     ) {
         public CompilationUnitProcessingResult() {
             this(new ArrayList<>(), new HashMap<>(), new HashMap<>(), new HashMap<>());
@@ -283,8 +290,8 @@ public class Runner {
             dataDefinitions.put(dataDefinition.name(), dataDefinition);
             return this;
         }
-        CompilationUnitProcessingResult addFunction(Function function) {
-            functions.put(function.name(), function);
+        CompilationUnitProcessingResult addFunctionDeclaration(FunctionDeclaration functionDeclaration) {
+            functionDeclarations.put(functionDeclaration.name(), functionDeclaration);
             return this;
         }
         CompilationUnitProcessingResult addVariableDeclaration(VariableDeclaration variableDeclaration) {
