@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import com.github.musiKk.Tokenizer.TokenType;
 
@@ -22,7 +23,6 @@ public class Runner {
     }
 
     public static void main(String[] args) {
-        // new Runner().runFile("test.tst");
         var runner = new Runner();
         var mainStackFrame = new StackFrame();
         var runtimeFile = runner.getOrInitRuntimeFile("test.tst", mainStackFrame);
@@ -115,6 +115,14 @@ public class Runner {
     }
 
     private Value evaluateFunction(FunctionEvaluationExpression fe, StackFrame frame) {
+        var optTarget = fe.target()
+            .map(target -> evaluateExpression(target, frame));
+        optTarget.ifPresent(target -> {
+            if (!(target instanceof Data)) {
+                throw new RuntimeException("cannot call functions on " + target);
+            }
+        });
+
         var functionName = fe.name();
         final Scope functionScope;
 
@@ -138,6 +146,9 @@ public class Runner {
         }
 
         var newStackFrame = frame.pushFrame(functionScope);
+        optTarget.ifPresent(target -> {
+            newStackFrame.putVariable("this", new Variable("this", target));
+        });
         for (int i = 0; i < fe.arguments().size(); i++) {
             var argument = fe.arguments().get(i);
             var value = evaluateExpression(argument, frame);
@@ -452,13 +463,7 @@ public class Runner {
         @Override
         public Value call(StackFrame stackFrame) {
             var args = stackFrame.getVariable("args");
-            String representation = switch (args.variable.value()) {
-                case null -> "null";
-                case NumberValue nv -> String.valueOf(nv.number());
-                case StringValue sv -> sv.string();
-                case Data dv -> dv.typeName() + "[...fields...]";
-                default -> args.toString();
-            };
+            String representation = stringify(args.variable.value());
             System.out.println(representation);
             return null;
         }
@@ -467,6 +472,22 @@ public class Runner {
         }
         public Scope scope() {
             return new DefaultScope();
+        }
+        static String stringify(Value value) {
+            return switch (value) {
+                case null -> "null";
+                case NumberValue nv -> String.valueOf(nv.number());
+                case StringValue sv -> sv.string();
+                case Data dv -> {
+                    var sb = new StringBuilder(dv.typeName() + "[");
+                    sb.append(dv.variables().entrySet().stream().map(e ->
+                        e.getKey() + "=" + stringify(e.getValue())
+                    ).collect(Collectors.joining(", ")));
+                    sb.append("]");
+                    yield sb.toString();
+                }
+                default -> value.toString();
+            };
         }
     }
 
