@@ -28,7 +28,7 @@ public class Runner {
         var runtimeFile = runner.getOrInitRuntimeFile("test.tst", mainStackFrame);
         var main = runtimeFile.scope.getVariable("main");
         if (main != null && main.variable.type() == Type.FUNCTION) {
-            runner.execute(main.variable.as(Function.class), mainStackFrame);
+            runner.evaluateFunction(new FunctionEvaluationExpression("main", List.of()), new StackFrame(null, main.scope));
         }
     }
 
@@ -45,10 +45,6 @@ public class Runner {
         for (var statement : statements) {
             execute(statement, frame);
         }
-    }
-
-    private void execute(Function functionDeclaration, StackFrame frame) {
-        execute(List.of(new ExpressionStatement(functionDeclaration.body())), frame.pushFrame(functionDeclaration.scope));
     }
 
     private Value evaluateExpression(Expression expression, StackFrame frame) {
@@ -221,6 +217,8 @@ public class Runner {
                         result.addDataDefinition(dataDefinition);
                     } else if (statement instanceof FunctionDeclaration functionDeclaration) {
                         result.addFunction(Function.of(functionDeclaration, runtimeFile.scope()));
+                    } else if (statement instanceof VariableDeclaration variableDeclaration) {
+                        result.addVariableDeclaration(variableDeclaration);
                     } else {
                         result.addStatement(statement);
                     }
@@ -229,6 +227,7 @@ public class Runner {
                     r1.statements.addAll(r2.statements);
                     r1.dataDefinitions.putAll(r2.dataDefinitions);
                     r1.functions.putAll(r2.functions);
+                    r1.variableDeclarations.putAll(r2.variableDeclarations);
                     return r1;
                 });
 
@@ -237,6 +236,9 @@ public class Runner {
         });
         processingResult.functions().forEach((name, function) -> {
             frame.putVariable(name, new Variable(name, Type.FUNCTION, function));
+        });
+        processingResult.variableDeclarations().forEach((name, variableDeclaration) -> {
+            execute(variableDeclaration, frame);
         });
 
         execute(processingResult.statements(), frame.pushFrame(runtimeFile.scope));
@@ -256,10 +258,11 @@ public class Runner {
     record CompilationUnitProcessingResult(
         List<Statement> statements,
         Map<String, DataDefinition> dataDefinitions,
+        Map<String, VariableDeclaration> variableDeclarations,
         Map<String, Function> functions
     ) {
         public CompilationUnitProcessingResult() {
-            this(new ArrayList<>(), new HashMap<>(), new HashMap<>());
+            this(new ArrayList<>(), new HashMap<>(), new HashMap<>(), new HashMap<>());
         }
         CompilationUnitProcessingResult addStatement(Statement statement) {
             statements.add(statement);
@@ -271,6 +274,10 @@ public class Runner {
         }
         CompilationUnitProcessingResult addFunction(Function function) {
             functions.put(function.name(), function);
+            return this;
+        }
+        CompilationUnitProcessingResult addVariableDeclaration(VariableDeclaration variableDeclaration) {
+            variableDeclarations.put(variableDeclaration.name(), variableDeclaration);
             return this;
         }
     }
