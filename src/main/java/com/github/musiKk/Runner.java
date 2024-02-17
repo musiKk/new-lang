@@ -405,7 +405,7 @@ public class Runner {
     record Function(String name, List<Parameter> parameters, Expression body, Scope scope) implements Value {
         static Function of(FunctionDeclaration functionDeclaration, Scope scope) {
             var parameters = functionDeclaration.parameters().stream()
-                    .map(varDecl -> new Parameter(varDecl.name(), Type.of(varDecl.type().get()), varDecl.initializer()))
+                    .map(varDecl -> new Parameter(varDecl.name(), varDecl.type().map(Type::of), varDecl.initializer()))
                     .toList();
             return new Function(
                 functionDeclaration.name(),
@@ -454,9 +454,9 @@ public class Runner {
             };
         }
     }
-    record Parameter(String name, Type value, Optional<Expression> initializer) {
+    record Parameter(String name, Optional<Type> value, Optional<Expression> initializer) {
         public Parameter(String name, Type value) {
-            this(name, value, Optional.empty());
+            this(name, Optional.of(value), Optional.empty());
         }
     }
 
