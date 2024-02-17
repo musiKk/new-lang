@@ -31,6 +31,7 @@ public class Parser {
             case IMPORT -> parseImportStatement(tokens);
             case DATA -> parseDataDefinition(tokens);
             case DEF -> parseFunctionDeclaration(tokens);
+            case NATIVE -> parseNativeFunctionDeclaration(tokens);
             case VAR -> {
                 tokens.next();
                 yield parseVariableDeclaration(tokens);
@@ -68,8 +69,46 @@ public class Parser {
         return new DataDefinition(nameToken.image(), variableDeclarations);
     }
 
+    // <> native def name "(" parameters* ")"
+    private NativeFunctionDeclaration parseNativeFunctionDeclaration(Tokens tokens) {
+        tokens.next(TokenType.NATIVE);
+        tokens.next(TokenType.DEF);
+
+        var nameToken = tokens.next(TokenType.IDENTIFIER);
+
+        List<VariableDeclaration> parameters = new ArrayList<>();
+        tokens.next(TokenType.LPAREN);
+        var maybeParameter = tokens.peek();
+        if (!tokens.matches(TokenType.RPAREN)) {
+            var variableDeclaration = parseVariableDeclaration(tokens);
+            parameters.add(variableDeclaration);
+            while (tokens.matches(TokenType.COMMA)) {
+                maybeParameter = tokens.peek();
+                if (maybeParameter.type() == TokenType.RPAREN) {
+                    tokens.next();
+                    break;
+                }
+                tokens.next(TokenType.COMMA);
+                variableDeclaration = parseVariableDeclaration(tokens);
+                parameters.add(variableDeclaration);
+            }
+        }
+        tokens.next(TokenType.RPAREN);
+        var token = tokens.peek();
+
+        String returnType;
+        if (token.type() == TokenType.COLON) {
+            tokens.next(TokenType.COLON);
+            var typeToken = tokens.next(TokenType.IDENTIFIER);
+            returnType = typeToken.image();
+        } else {
+            returnType = "void";
+        }
+        return new NativeFunctionDeclaration(nameToken.image(), parameters, returnType);
+    }
+
     // <> def receiver? . name "(" parameters* ")" (":" type)? "=" expression
-    private FunctionDeclaration parseFunctionDeclaration(Tokens tokens) {
+    private UserFunctionDeclaration parseFunctionDeclaration(Tokens tokens) {
         tokens.next(TokenType.DEF);
         var nameToken = tokens.next(TokenType.IDENTIFIER);
 
@@ -113,7 +152,7 @@ public class Parser {
         tokens.next(TokenType.EQUALS);
 
         var body = parseExpression(tokens);
-        return new FunctionDeclaration(receiver, nameToken.image(), parameters, returnType, body);
+        return new UserFunctionDeclaration(receiver, nameToken.image(), parameters, returnType, body);
     }
 
     private VariableDeclaration parseVariableDeclaration(Tokens tokens) {
@@ -189,9 +228,7 @@ public class Parser {
         var token = tokens.peek();
 
         var expression = switch (token.type()) {
-            case IDENTIFIER -> {
-                yield parseNameExpression(tokens);
-            }
+            case IDENTIFIER -> parseNameExpression(tokens);
             case NUMBER -> {
                 var numberToken = tokens.next();
                 yield new NumberExpression(Integer.parseInt(numberToken.image()));
@@ -287,13 +324,13 @@ public class Parser {
             "var x = 1", new VariableDeclaration("x", new NumberExpression(1))));
         testCases.add(new StatementTestCase(
             "def foo() = {}",
-            new FunctionDeclaration(StandaloneFunctionReceiver.get(), "foo", List.of(), "void", new BlockExpression(List.of()))));
+            new UserFunctionDeclaration(StandaloneFunctionReceiver.get(), "foo", List.of(), "void", new BlockExpression(List.of()))));
         testCases.add(new StatementTestCase(
             "def foo(i) = {}",
-            new FunctionDeclaration(StandaloneFunctionReceiver.get(), "foo", List.of(new VariableDeclaration("i")), "void", new BlockExpression(List.of()))));
+            new UserFunctionDeclaration(StandaloneFunctionReceiver.get(), "foo", List.of(new VariableDeclaration("i")), "void", new BlockExpression(List.of()))));
         testCases.add(new StatementTestCase(
             "def Foo.foo() = {}",
-            new FunctionDeclaration(new FunctionReceiverVariable("Foo"), "foo", List.of(), "void", new BlockExpression(List.of()))));
+            new UserFunctionDeclaration(new FunctionReceiverVariable("Foo"), "foo", List.of(), "void", new BlockExpression(List.of()))));
         testCases.add(new ExpressionTestCase(
             "foo()",
             new FunctionEvaluationExpression("foo", List.of())));
@@ -416,27 +453,14 @@ public class Parser {
 
 }
 
-sealed interface Statement permits
-    ExpressionStatement,
-    Import,
-    FunctionDeclaration,
-    VariableDeclaration,
-    DataDefinition
-{}
+sealed interface Statement {}
 
 record ExpressionStatement(
     Expression expression
 ) implements Statement {}
 
-sealed interface Expression permits
-    AssignmentExpression,
-    BlockExpression,
-    NumberExpression,
-    StringExpression,
-    VariableExpression,
-    FunctionEvaluationExpression,
-    BinaryExpression
-{}
+sealed interface Expression {}
+
 record AssignmentExpression(
     VariableExpression target,
     Expression value
@@ -492,13 +516,28 @@ record StandaloneFunctionReceiver() implements FunctionReceiverType {
 }
 
 record Import(String name) implements Statement {}
-record FunctionDeclaration(
+
+sealed interface FunctionDeclaration extends Statement {
+    String name();
+    List<VariableDeclaration> parameters();
+    FunctionReceiverType receiver();
+}
+record NativeFunctionDeclaration(
+    String name,
+    List<VariableDeclaration> parameters,
+    String returnType
+) implements FunctionDeclaration {
+    public FunctionReceiverType receiver() {
+        return StandaloneFunctionReceiver.get();
+    }
+}
+record UserFunctionDeclaration(
     FunctionReceiverType receiver,
     String name,
     List<VariableDeclaration> parameters,
     String returnType,
     Expression body
-) implements Statement {}
+) implements FunctionDeclaration {}
 record VariableDeclaration(
     String name,
     Optional<String> type,

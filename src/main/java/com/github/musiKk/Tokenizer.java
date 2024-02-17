@@ -174,6 +174,7 @@ public class Tokenizer {
         DATA("data"),
         DEF("def"),
         VAR("var"),
+        NATIVE("native"),
 
         NUMBER,
         STRING,

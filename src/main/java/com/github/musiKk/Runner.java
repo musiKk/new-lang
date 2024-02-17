@@ -1,6 +1,7 @@
 package com.github.musiKk;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -8,7 +9,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 import com.github.musiKk.Tokenizer.TokenType;
 
@@ -16,26 +16,20 @@ public class Runner {
 
     Map<Path, RuntimeFile> runtimeFiles = new HashMap<>();
 
-    Map<String, NativeFunction> nativeFunctions = new HashMap<>();
-
-    {
-        nativeFunctions.put("_print", new PrintFunction());
-    }
-
     public static void main(String[] args) {
         var runner = new Runner();
         var mainStackFrame = new StackFrame();
-        var runtimeFile = runner.getOrInitRuntimeFile("test.tst", mainStackFrame);
+        var runtimeFile = runner.getOrInitRuntimeFile("main", "test.tst", mainStackFrame);
         var main = runtimeFile.scope.getVariable("main");
         if (main != null && main.variable.type() == Type.FUNCTION) {
             runner.evaluateFunction(new FunctionEvaluationExpression("main", List.of()), new StackFrame(null, main.scope));
         }
     }
 
-    private RuntimeFile getOrInitRuntimeFile(String pathString, StackFrame frame) {
+    private RuntimeFile getOrInitRuntimeFile(String moduleName, String pathString, StackFrame frame) {
         var path = Path.of(pathString);
         if (!runtimeFiles.containsKey(path)) {
-            var runtimeFile = initRuntimeFile(path, frame.pushFrame(new DefaultScope()));
+            var runtimeFile = initRuntimeFile(moduleName, path, frame.pushFrame(new DefaultScope()));
             runtimeFiles.put(path, runtimeFile);
         }
         return runtimeFiles.get(path);
@@ -121,29 +115,21 @@ public class Runner {
                 if (targetValue instanceof Data data) {
                     return data;
                 }
-                throw new RuntimeException("cannot call functions on " + targetValue);
+                throw new RuntimeException("cannot call functions on " + targetValue.type());
             });
 
         var functionLookupName = optTarget.map(t -> t.typeName() + ".").orElse("") + fe.name();
-        final Scope functionScope;
 
-        List<Parameter> parameters;
-        if (nativeFunctions.containsKey(functionLookupName)) {
-            var nativeFunction = nativeFunctions.get(functionLookupName);
-            functionScope = nativeFunction.scope();
-            parameters = nativeFunction.parameters();
-        } else {
-            switch (frame.getVariable(functionLookupName).variable.value) {
-                case Function function -> {
-                    functionScope = function.scope();
-                    parameters = function.parameters();
-                }
-                case DataCreationFunction dataCreationFunction -> {
-                    functionScope = dataCreationFunction.scope();
-                    parameters = dataCreationFunction.parameters();
-                }
-                default -> throw new RuntimeException("not a function " + functionLookupName);
+        final Function function;
+        final Scope functionScope;
+        final List<Parameter> parameters;
+        switch (frame.getVariable(functionLookupName).variable.value) {
+            case Function f -> {
+                function = f;
+                functionScope = f.scope();
+                parameters = f.parameters();
             }
+            default -> throw new RuntimeException("not a function " + functionLookupName);
         }
 
         var newStackFrame = frame.pushFrame(functionScope);
@@ -157,19 +143,17 @@ public class Runner {
             newStackFrame.putVariable(name, new Variable(name, value));
         }
 
-        if (nativeFunctions.containsKey(functionLookupName)) {
-            var nativeFunction = nativeFunctions.get(functionLookupName);
-            return nativeFunction.call(newStackFrame);
-        }
-
-        return switch (frame.getVariable(functionLookupName).variable.value) {
+        return switch (function) {
             case DataCreationFunction dataCreationFunction -> {
                 yield createData(dataCreationFunction, newStackFrame);
             }
-            case Function function -> {
-                yield evaluateExpression(function.body(), newStackFrame);
+            case UserFunction uf -> {
+                yield evaluateExpression(uf.body(), newStackFrame);
             }
-            default -> throw new RuntimeException("not a function " + functionLookupName);
+            case NativeFunction nf -> {
+                var nativeFunctionHandle = nf.handle;
+                yield nativeFunctionHandle.call(newStackFrame);
+            }
         };
     }
 
@@ -208,11 +192,11 @@ public class Runner {
     }
 
     private void processImport(Import imp, StackFrame frame) {
-        var runtimeFile = getOrInitRuntimeFile(imp.name() + ".tst", frame);
+        var runtimeFile = getOrInitRuntimeFile(imp.name(), imp.name() + ".tst", frame);
         frame.scope().addImportScope(imp.name(), runtimeFile.scope);
     }
 
-    private RuntimeFile initRuntimeFile(Path path, StackFrame frame) {
+    private RuntimeFile initRuntimeFile(String moduleName, Path path, StackFrame frame) {
         String fileContent;
         try {
             fileContent = Files.readString(path);
@@ -224,17 +208,11 @@ public class Runner {
         RuntimeFile runtimeFile = new RuntimeFile(frame.scope);
 
         var processingResult = compilationUnit.statements().stream()
-                .reduce(new CompilationUnitProcessingResult(), (result, statement) -> {
-                    if (statement instanceof DataDefinition dataDefinition) {
-                        result.addDataDefinition(dataDefinition);
-                    } else if (statement instanceof FunctionDeclaration functionDeclaration) {
-                        result.addFunctionDeclaration(functionDeclaration);
-                    } else if (statement instanceof VariableDeclaration variableDeclaration) {
-                        result.addVariableDeclaration(variableDeclaration);
-                    } else {
-                        result.addStatement(statement);
-                    }
-                    return result;
+                .reduce(new CompilationUnitProcessingResult(), (result, statement) -> switch (statement) {
+                    case DataDefinition dataDefinition -> result.addDataDefinition(dataDefinition);
+                    case FunctionDeclaration functionDeclaration -> result.addFunctionDeclaration(functionDeclaration);
+                    case VariableDeclaration variableDeclaration -> result.addVariableDeclaration(variableDeclaration);
+                    default -> result.addStatement(statement);
                 }, (r1, r2) -> {
                     r1.statements.addAll(r2.statements);
                     r1.dataDefinitions.putAll(r2.dataDefinitions);
@@ -252,7 +230,7 @@ public class Runner {
                 case FunctionReceiverVariable(String name) -> name + "." + functionName;
                 default -> functionName;
             };
-            var function = Function.of(functionDeclaration, runtimeFile.scope());
+            var function = Function.of(moduleName, functionDeclaration, runtimeFile.scope());
             frame.putVariable(lookupName, new Variable(functionName, Type.FUNCTION, function));
         });
         processingResult.variableDeclarations().forEach((name, variableDeclaration) -> {
@@ -262,15 +240,6 @@ public class Runner {
         execute(processingResult.statements(), frame.pushFrame(runtimeFile.scope));
 
         return runtimeFile;
-    }
-
-    static void processDataDefinition(DataDefinition dataDefinition, Scope scope) {
-        scope.putVariable(
-            dataDefinition.name(),
-            new Variable(
-                dataDefinition.name(),
-                Type.DATA_CREATION_FUNCTION,
-                DataCreationFunction.of(dataDefinition, scope)));
     }
 
     record CompilationUnitProcessingResult(
@@ -298,6 +267,15 @@ public class Runner {
             variableDeclarations.put(variableDeclaration.name(), variableDeclaration);
             return this;
         }
+    }
+
+    static void processDataDefinition(DataDefinition dataDefinition, Scope scope) {
+        scope.putVariable(
+            dataDefinition.name(),
+            new Variable(
+                dataDefinition.name(),
+                Type.DATA_CREATION_FUNCTION,
+                DataCreationFunction.of(dataDefinition, scope)));
     }
 
     record RuntimeFile(Scope scope) {}
@@ -338,15 +316,15 @@ public class Runner {
         }
     }
 
-    interface Scope {
+    public interface Scope {
         ScopedVariable getVariable(String name);
         void putVariable(String name, Variable variable);
         void addImportScope(String name, Scope scope);
     }
 
-    record ScopedVariable(Variable variable, Scope scope) {}
+    public record ScopedVariable(Variable variable, Scope scope) {}
 
-    record StackFrame(
+    public record StackFrame(
         StackFrame parent,
         Scope scope
     ) {
@@ -383,31 +361,63 @@ public class Runner {
         }
     }
 
-    interface Value {
+    public interface Value {
         Type type();
     }
 
-    record NumberValue(int number) implements Value {
+    public record NumberValue(int number) implements Value {
         public Type type() {
             return Type.NUMBER;
         }
     }
-    record StringValue(String string) implements Value {
+    public record StringValue(String string) implements Value {
         public Type type() {
             return Type.STRING;
         }
     }
-    record Data(String typeName, Map<String, Value> variables) implements Value {
+    public record Data(String typeName, Map<String, Value> variables) implements Value {
         public Type type() {
             return Type.DATA;
         }
     }
-    record Function(String name, List<Parameter> parameters, Expression body, Scope scope) implements Value {
-        static Function of(FunctionDeclaration functionDeclaration, Scope scope) {
-            var parameters = functionDeclaration.parameters().stream()
+    public record BooleanValue(boolean value) implements Value {
+        public Type type() {
+            return Type.BOOLEAN;
+        }
+    }
+    public static Value True = new BooleanValue(true);
+    public static Value False = new BooleanValue(false);
+
+    sealed interface Function extends Value {
+        List<Parameter> parameters();
+        Scope scope();
+        default Optional<String> receiver() {
+            return Optional.empty();
+        }
+
+        static Function of(String moduleName, FunctionDeclaration functionDeclaration, Scope scope) {
+            var parameters = mapParameters(functionDeclaration.parameters());
+            return switch (functionDeclaration) {
+                case UserFunctionDeclaration ufd -> UserFunction.of(ufd, parameters, scope);
+                case NativeFunctionDeclaration nfd -> NativeFunction.of(nfd, parameters, scope, moduleName);
+                default -> throw new RuntimeException("not yet implemented " + functionDeclaration);
+            };
+        }
+        static List<Parameter> mapParameters(List<VariableDeclaration> variableDeclarations) {
+            return variableDeclarations.stream()
                     .map(varDecl -> new Parameter(varDecl.name(), varDecl.type().map(Type::of), varDecl.initializer()))
                     .toList();
-            return new Function(
+        }
+    }
+
+    record UserFunction(Optional<String> receiver, String name, List<Parameter> parameters, Expression body, Scope scope) implements Function {
+        static UserFunction of(UserFunctionDeclaration functionDeclaration, List<Parameter> parameters, Scope scope) {
+            Optional<String> receiver = switch (functionDeclaration.receiver()) {
+                case FunctionReceiverVariable(String name) -> Optional.of(name);
+                default -> Optional.empty();
+            };
+            return new UserFunction(
+                receiver,
                 functionDeclaration.name(),
                 parameters,
                 functionDeclaration.body(),
@@ -417,7 +427,7 @@ public class Runner {
             return Type.FUNCTION;
         }
     }
-    record DataCreationFunction(String name, List<Parameter> parameters, Scope scope) implements Value {
+    record DataCreationFunction(String name, List<Parameter> parameters, Scope scope) implements Function {
         static DataCreationFunction of(DataDefinition dataDefinition, Scope scope) {
             var parameters = dataDefinition.variableDeclarations().stream()
                     .map(varDecl -> new Parameter(varDecl.name(), Type.of(varDecl.type().get())))
@@ -429,7 +439,7 @@ public class Runner {
         }
     }
 
-    record Variable(String name, Type type, Value value) {
+    public record Variable(String name, Type type, Value value) {
         public Variable(String name, Value value) {
             this(name, value.type(), value);
         }
@@ -442,14 +452,17 @@ public class Runner {
     enum Type {
         NUMBER,
         STRING,
+        BOOLEAN,
         DATA,
         DATA_DEFINITION,
         DATA_CREATION_FUNCTION,
-        FUNCTION;
+        FUNCTION,
+        NATIVE_FUNCTION;
         static Type of(String descriptor) {
             return switch (descriptor) {
                 case "Int" -> NUMBER;
                 case "String" -> STRING;
+                case "Boolean" -> BOOLEAN;
                 default -> DATA;
             };
         }
@@ -460,42 +473,35 @@ public class Runner {
         }
     }
 
-    interface NativeFunction {
-        Value call(StackFrame stackFrame);
-        List<Parameter> parameters();
-        Scope scope();
+    record NativeFunction(String name, List<Parameter> parameters, Scope scope, NativeFunctionHandle handle) implements Function {
+        static NativeFunction of(NativeFunctionDeclaration nfd, List<Parameter> parameters, Scope scope, String moduleName) {
+            var moduleNameInitFirst = moduleName.substring(0, 1).toUpperCase() + moduleName.substring(1);
+            try {
+                var cls = Class.forName("com.github.musiKk.natives." + moduleNameInitFirst);
+                var moduleInstance = cls.getDeclaredConstructor().newInstance();
+                var handle = new NativeFunctionHandle() {
+                    @Override
+                    public Value call(StackFrame stackFrame) {
+                        try {
+                            var method = cls.getMethod(nfd.name(), StackFrame.class);
+                            return (Value) method.invoke(moduleInstance, stackFrame);
+                        } catch (NoSuchMethodException | SecurityException | IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                };
+                return new NativeFunction(nfd.name(), parameters, scope, handle);
+            } catch (ClassNotFoundException | InstantiationException | IllegalAccessException | IllegalArgumentException | InvocationTargetException | NoSuchMethodException | SecurityException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        public Type type() {
+            return Type.NATIVE_FUNCTION;
+        }
     }
 
-    static class PrintFunction implements NativeFunction {
-        @Override
-        public Value call(StackFrame stackFrame) {
-            var args = stackFrame.getVariable("args");
-            String representation = stringify(args.variable.value());
-            System.out.println(representation);
-            return null;
-        }
-        public List<Parameter> parameters() {
-            return List.of(new Parameter("args", Type.DATA));
-        }
-        public Scope scope() {
-            return new DefaultScope();
-        }
-        static String stringify(Value value) {
-            return switch (value) {
-                case null -> "null";
-                case NumberValue nv -> String.valueOf(nv.number());
-                case StringValue sv -> sv.string();
-                case Data dv -> {
-                    var sb = new StringBuilder(dv.typeName() + "[");
-                    sb.append(dv.variables().entrySet().stream().map(e ->
-                        e.getKey() + "=" + stringify(e.getValue())
-                    ).collect(Collectors.joining(", ")));
-                    sb.append("]");
-                    yield sb.toString();
-                }
-                default -> value.toString();
-            };
-        }
+    interface NativeFunctionHandle {
+        Value call(StackFrame stackFrame);
     }
 
     static class SymbolNotFoundException extends RuntimeException {
