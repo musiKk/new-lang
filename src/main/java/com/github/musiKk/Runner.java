@@ -109,16 +109,25 @@ public class Runner {
     }
 
     private Value evaluateFunction(FunctionEvaluationExpression fe, StackFrame frame) {
-        var optTarget = fe.target()
+        interface EvaluationTarget { String name(); }
+        record DataTarget(Data data) implements EvaluationTarget {
+            public String name() {
+                return data.typeName;
+            }
+        }
+        record UfcsTarget(String name) implements EvaluationTarget {}
+
+        Optional<EvaluationTarget> optTarget = fe.target()
             .map(targetExpression -> {
                 var targetValue = evaluateExpression(targetExpression, frame);
-                if (targetValue instanceof Data data) {
-                    return data;
-                }
-                throw new RuntimeException("cannot call functions on " + targetValue.type());
+                return switch (targetValue) {
+                    case Data data -> new DataTarget(data);
+                    case DataCreationFunction dcf -> new UfcsTarget(dcf.name);
+                    default -> throw new RuntimeException("cannot call functions on " + targetValue.type());
+                };
             });
 
-        var functionLookupName = optTarget.map(t -> t.typeName() + ".").orElse("") + fe.name();
+        var functionLookupName = optTarget.map(t -> t.name() + ".").orElse("") + fe.name();
 
         final Function function;
         final Scope functionScope;
@@ -133,10 +142,18 @@ public class Runner {
         }
 
         var newStackFrame = frame.pushFrame(functionScope);
-        optTarget.ifPresent(target -> {
+        optTarget.map(target -> {
+            return switch (target) {
+                case DataTarget dt -> dt.data;
+                case UfcsTarget __ -> evaluateExpression(fe.arguments().get(0), frame);
+                default -> null;
+            };
+        }).ifPresent(target -> {
             newStackFrame.putVariable("this", new Variable("this", target));
         });
-        for (int i = 0; i < fe.arguments().size(); i++) {
+
+        int firstIndex = optTarget.isPresent() && optTarget.get() instanceof UfcsTarget ? 1 : 0;
+        for (int i = firstIndex; i < fe.arguments().size(); i++) {
             var argument = fe.arguments().get(i);
             var value = evaluateExpression(argument, frame);
             var name = parameters.get(i).name();
