@@ -177,7 +177,7 @@ public class Parser {
     }
 
     private Expression parseAssignment(Tokens tokens) {
-        var expr = parseEquality(tokens);
+        var expr = parseComparison(tokens);
 
         if (tokens.matches(TokenType.EQUALS)) {
             if (expr instanceof VariableExpression ve) {
@@ -191,10 +191,10 @@ public class Parser {
         return expr;
     }
 
-    private Expression parseEquality(Tokens tokens) {
+    private Expression parseComparison(Tokens tokens) {
         var expr = parsePlus(tokens);
 
-        while (tokens.matches(TokenType.EQUALS_EQUALS, TokenType.NOT_EQUALS)) {
+        while (tokens.matches(TokenType.EQUALS_EQUALS, TokenType.NOT_EQUALS, TokenType.LT, TokenType.GT, TokenType.LE, TokenType.GE)) {
             var operator = tokens.next().type();
             var right = parsePlus(tokens);
             expr = new BinaryExpression(expr, operator, right);
@@ -244,6 +244,7 @@ public class Parser {
                 tokens.next(TokenType.RPAREN);
                 yield e;
             }
+            case IF -> parseIfExpression(tokens);
             default -> throw new RuntimeException("Unexpected token: " + token);
         };
 
@@ -261,6 +262,18 @@ public class Parser {
             };
         }
         return expression;
+    }
+
+    private Expression parseIfExpression(Tokens tokens) {
+        tokens.next(TokenType.IF);
+        var condition = parseExpression(tokens);
+        var thenBranch = parseExpression(tokens);
+        var elseBranch = Optional.<Expression>empty();
+        if (tokens.matches(TokenType.ELSE)) {
+            tokens.next(TokenType.ELSE);
+            elseBranch = Optional.of(parseExpression(tokens));
+        }
+        return new IfExpression(condition, thenBranch, elseBranch);
     }
 
     private Expression parseNameExpression(Tokens tokens) {
@@ -520,6 +533,12 @@ record StandaloneFunctionReceiver() implements FunctionReceiverType {
         return INSTANCE;
     }
 }
+
+record IfExpression(
+    Expression condition,
+    Expression thenBranch,
+    Optional<Expression> elseBranch
+) implements Expression {}
 
 record Import(String name) implements Statement {}
 

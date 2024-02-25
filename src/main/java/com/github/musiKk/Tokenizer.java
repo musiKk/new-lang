@@ -176,10 +176,13 @@ public class Tokenizer {
         VAR("var"),
         NATIVE("native"),
 
+        IF("if"), ELSE("else"),
+
         NUMBER,
         STRING,
 
         EQUALS_EQUALS("=="), NOT_EQUALS("!="),
+        LT("<"), GT(">"), LE("<="), GE(">="),
         PLUS("+"), MINUS("-"),
         STAR("*"), SLASH("/"),
 

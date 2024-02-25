@@ -29,7 +29,7 @@ public class Runner {
     private RuntimeFile getOrInitRuntimeFile(String moduleName, String pathString, StackFrame frame) {
         var path = Path.of(pathString);
         if (!runtimeFiles.containsKey(path)) {
-            var runtimeFile = initRuntimeFile(moduleName, path, frame.pushFrame(new DefaultScope()));
+            var runtimeFile = initRuntimeFile(moduleName, path, frame.pushFrame(new Scope()));
             runtimeFiles.put(path, runtimeFile);
         }
         return runtimeFiles.get(path);
@@ -60,24 +60,87 @@ public class Runner {
                 yield evaluateFunction(fe, frame);
             }
             case BlockExpression be -> {
-                var blockFrame = frame.pushScope();
-                Value result = null;
-                for (var statement : be.statements()) {
-                    result = execute(statement, blockFrame);
+                frame.pushScope();
+                try {
+                    Value result = null;
+                    for (var statement : be.statements()) {
+                        result = execute(statement, frame);
+                    }
+                    yield result;
+                } finally {
+                    frame.popScope();
                 }
-                frame.popScope();
-                yield result;
             }
             case BinaryExpression be -> {
-                var left = (NumberValue) evaluateExpression(be.left(), frame);
-                var right = (NumberValue) evaluateExpression(be.right(), frame);
                 yield switch (be.operator()) {
-                    case TokenType.PLUS -> new NumberValue(left.number() + right.number());
-                    case TokenType.MINUS -> new NumberValue(left.number() - right.number());
-                    case TokenType.STAR -> new NumberValue(left.number() * right.number());
-                    case TokenType.SLASH -> new NumberValue(left.number() / right.number());
+                    case TokenType.PLUS -> {
+                        var left = evaluateExpression(be.left(), frame);
+                        var right = evaluateExpression(be.right(), frame);
+                        if (left instanceof NumberValue ln && right instanceof NumberValue rn) {
+                            yield new NumberValue(ln.number() + rn.number());
+                        } else {
+                            yield new StringValue(left.toString() + right.toString());
+                        }
+                    }
+                    case TokenType.MINUS -> {
+                        var left = (NumberValue) evaluateExpression(be.left(), frame);
+                        var right = (NumberValue) evaluateExpression(be.right(), frame);
+                        yield new NumberValue(left.number() - right.number());
+                    }
+                    case TokenType.STAR -> {
+                        var left = (NumberValue) evaluateExpression(be.left(), frame);
+                        var right = (NumberValue) evaluateExpression(be.right(), frame);
+                        yield new NumberValue(left.number() * right.number());
+                    }
+                    case TokenType.SLASH -> {
+                        var left = (NumberValue) evaluateExpression(be.left(), frame);
+                        var right = (NumberValue) evaluateExpression(be.right(), frame);
+                        yield new NumberValue(left.number() / right.number());
+                    }
+                    case TokenType.EQUALS_EQUALS -> {
+                        var left = evaluateExpression(be.left(), frame);
+                        var right = evaluateExpression(be.right(), frame);
+                        yield left.equals(right) ? True : False;
+                    }
+                    case TokenType.NOT_EQUALS -> {
+                        var left = evaluateExpression(be.left(), frame);
+                        var right = evaluateExpression(be.right(), frame);
+                        yield left.equals(right) ? False : True;
+                    }
+                    case TokenType.LT -> {
+                        var left = (NumberValue) evaluateExpression(be.left(), frame);
+                        var right = (NumberValue) evaluateExpression(be.right(), frame);
+                        yield left.number() < right.number() ? True : False;
+                    }
+                    case TokenType.GT -> {
+                        var left = (NumberValue) evaluateExpression(be.left(), frame);
+                        var right = (NumberValue) evaluateExpression(be.right(), frame);
+                        yield left.number() > right.number() ? True : False;
+                    }
+                    case TokenType.LE -> {
+                        var left = (NumberValue) evaluateExpression(be.left(), frame);
+                        var right = (NumberValue) evaluateExpression(be.right(), frame);
+                        yield left.number() <= right.number() ? True : False;
+                    }
+                    case TokenType.GE -> {
+                        var left = (NumberValue) evaluateExpression(be.left(), frame);
+                        var right = (NumberValue) evaluateExpression(be.right(), frame);
+                        yield left.number() >= right.number() ? True : False;
+                    }
                     default -> throw new RuntimeException("not yet implemented " + be.operator());
                 };
+            }
+            case IfExpression ie -> {
+                var condition = evaluateExpression(ie.condition(), frame);
+                if (condition instanceof BooleanValue bv) {
+                    if (bv.value()) {
+                        yield evaluateExpression(ie.thenBranch(), frame);
+                    } else {
+                        yield ie.elseBranch().map(elseExpression -> evaluateExpression(elseExpression, frame)).orElse(null);
+                    }
+                } else {
+                    throw new RuntimeException("condition must be a boolean");
+                }
             }
             case AssignmentExpression ae -> {
                 var lhs = ae.target();
@@ -297,14 +360,23 @@ public class Runner {
 
     record RuntimeFile(Scope scope) {}
 
-    record DefaultScope(Map<String, Variable> variables, Scope parent, Map<String, Scope> importedScopes) implements Scope {
-        DefaultScope() {
+    static class Scope {
+        Map<String, Variable> variables;
+        Scope parent;
+        Map<String, Scope> importedScopes;
+
+        Scope(Map<String, Variable> variables, Scope parent, Map<String, Scope> importedScopes) {
+            this.variables = variables;
+            this.parent = parent;
+            this.importedScopes = importedScopes;
+        }
+
+        Scope() {
             this(new HashMap<>(), null, new HashMap<>());
         }
-        DefaultScope(Scope parent) {
+        Scope(Scope parent) {
             this(new HashMap<>(), parent, new HashMap<>());
         }
-        @Override
         public ScopedVariable getVariable(String name) {
             if (variables.containsKey(name)) {
                 return new ScopedVariable(variables.get(name), this);
@@ -323,28 +395,25 @@ public class Runner {
                 throw new SymbolNotFoundException("symbol " + name + " not found");
             }
         }
-        @Override
         public void putVariable(String name, Variable variable) {
             variables.put(name, variable);
         }
-        @Override
         public void addImportScope(String name, Scope scope) {
             importedScopes.put(name, scope);
         }
     }
 
-    public interface Scope {
-        ScopedVariable getVariable(String name);
-        void putVariable(String name, Variable variable);
-        void addImportScope(String name, Scope scope);
-    }
-
     public record ScopedVariable(Variable variable, Scope scope) {}
 
-    public record StackFrame(
-        StackFrame parent,
-        Scope scope
-    ) {
+    public static class StackFrame {
+        StackFrame parent;
+        Scope scope;
+
+        public StackFrame(StackFrame parent, Scope scope) {
+            this.parent = parent;
+            this.scope = scope;
+        }
+
         /**
          * The stack frame that runs the program does not have a scope and thus
          * cannot hold any symbols.
@@ -352,6 +421,11 @@ public class Runner {
         public StackFrame() {
             this(null, null);
         }
+
+        Scope scope() {
+            return scope;
+        }
+
         /**
          * Pushes a frame with a new scope when running a new function. The
          * scope passed is the scope of the function definition.
@@ -360,11 +434,13 @@ public class Runner {
             return new StackFrame(this, scope);
         }
         public StackFrame pushScope() {
-            var newScope = new DefaultScope(scope);
-            return new StackFrame(this, newScope);
+            var newScope = new Scope(scope);
+            this.scope = newScope;
+            return this;
         }
         public StackFrame popScope() {
-            return parent;
+            this.scope = scope.parent;
+            return this;
         }
 
         // convenience methods that pass through to the scope; not sure if they are needed
@@ -376,6 +452,13 @@ public class Runner {
         public void putVariable(String name, Variable variable) {
             scope.putVariable(name, variable);
         }
+        void dumpFrames() {
+            StackFrame current = this;
+            while (current != null) {
+                System.out.println(current.scope.variables);
+                current = current.parent;
+            }
+        }
     }
 
     public interface Value {
@@ -386,10 +469,18 @@ public class Runner {
         public Type type() {
             return Type.NUMBER;
         }
+        @Override
+        public String toString() {
+            return Integer.toString(number);
+        }
     }
     public record StringValue(String string) implements Value {
         public Type type() {
             return Type.STRING;
+        }
+        @Override
+        public String toString() {
+            return string;
         }
     }
     public record Data(String typeName, Map<String, Value> variables) implements Value {
