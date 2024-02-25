@@ -141,7 +141,7 @@ public class Runner {
             default -> throw new RuntimeException("not a function " + functionLookupName);
         }
 
-        var newStackFrame = frame.pushFrame(functionScope);
+        var newStackFrame = frame.pushFrame(functionScope).pushScope();
         optTarget.map(target -> {
             return switch (target) {
                 case DataTarget dt -> dt.data;
