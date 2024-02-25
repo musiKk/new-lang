@@ -238,6 +238,12 @@ public class Parser {
                 yield new StringExpression(stringToken.image());
             }
             case LBRACE -> parseBlockExpression(tokens);
+            case LPAREN -> {
+                tokens.next(TokenType.LPAREN);
+                var e = parseExpression(tokens);
+                tokens.next(TokenType.RPAREN);
+                yield e;
+            }
             default -> throw new RuntimeException("Unexpected token: " + token);
         };
 
