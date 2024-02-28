@@ -160,9 +160,9 @@ public class Runner {
                 } else {
                     try {
                         ScopedVariable sv = frame.getVariable(lhs.name());
-                        sv.scope.putVariable(lhs.name(), new Variable(lhs.name(), rhs));
+                        sv.scope.putVariable(lhs.name(), new Variable(rhs));
                     } catch (SymbolNotFoundException e) {
-                        frame.putVariable(lhs.name(), new Variable(lhs.name(), rhs));
+                        frame.putVariable(lhs.name(), new Variable(rhs));
                     }
                 }
                 yield rhs;
@@ -212,7 +212,7 @@ public class Runner {
                 default -> null;
             };
         }).ifPresent(target -> {
-            newStackFrame.putVariable("this", new Variable("this", target));
+            newStackFrame.putVariable("this", new Variable(target));
         });
 
         int firstIndex = optTarget.isPresent() && optTarget.get() instanceof UfcsTarget ? 1 : 0;
@@ -220,7 +220,7 @@ public class Runner {
             var argument = fe.arguments().get(i);
             var value = evaluateExpression(argument, frame);
             var name = parameters.get(i).name();
-            newStackFrame.putVariable(name, new Variable(name, value));
+            newStackFrame.putVariable(name, new Variable(value));
         }
 
         return switch (function) {
@@ -256,7 +256,7 @@ public class Runner {
             case ExpressionStatement es -> evaluateExpression(es.expression(), frame);
             case VariableDeclaration vds -> {
                 var optValue = vds.initializer().map(initializer -> evaluateExpression(initializer, frame));
-                frame.putVariable(vds.name(), new Variable(vds.name(), optValue.orElse(null)));
+                frame.putVariable(vds.name(), new Variable(optValue.orElse(null)));
                 yield null;
             }
             case Import imp -> {
@@ -311,7 +311,7 @@ public class Runner {
                 default -> functionName;
             };
             var function = Function.of(moduleName, functionDeclaration, runtimeFile.scope());
-            frame.putVariable(lookupName, new Variable(functionName, Type.FUNCTION, function));
+            frame.putVariable(lookupName, new Variable(Type.FUNCTION, function));
         });
         processingResult.variableDeclarations().forEach((name, variableDeclaration) -> {
             execute(variableDeclaration, frame);
@@ -353,7 +353,6 @@ public class Runner {
         scope.putVariable(
             dataDefinition.name(),
             new Variable(
-                dataDefinition.name(),
                 Type.DATA_CREATION_FUNCTION,
                 DataCreationFunction.of(dataDefinition, scope)));
     }
@@ -547,9 +546,9 @@ public class Runner {
         }
     }
 
-    public record Variable(String name, Type type, Value value) {
-        public Variable(String name, Value value) {
-            this(name, value.type(), value);
+    public record Variable(Type type, Value value) {
+        public Variable(Value value) {
+            this(value.type(), value);
         }
 
         <T> T as(Class<T> clazz) {
