@@ -231,7 +231,7 @@ public class Parser {
             case IDENTIFIER -> parseNameExpression(tokens);
             case NUMBER -> {
                 var numberToken = tokens.next();
-                yield new NumberExpression(Integer.parseInt(numberToken.image()));
+                yield new NumberExpression(Long.parseLong(numberToken.image()));
             }
             case STRING -> {
                 var stringToken = tokens.next();
@@ -488,7 +488,7 @@ record BlockExpression(
     List<Statement> statements
 ) implements Expression {}
 record NumberExpression(
-    int number
+    long number
 ) implements Expression {}
 record StringExpression(
     String string

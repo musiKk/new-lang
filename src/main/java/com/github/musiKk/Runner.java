@@ -465,13 +465,13 @@ public class Runner {
         Type type();
     }
 
-    public record NumberValue(int number) implements Value {
+    public record NumberValue(long number) implements Value {
         public Type type() {
             return Type.NUMBER;
         }
         @Override
         public String toString() {
-            return Integer.toString(number);
+            return Long.toString(number);
         }
     }
     public record StringValue(String string) implements Value {
