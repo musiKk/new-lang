@@ -12,12 +12,20 @@ import java.util.Optional;
 
 import com.github.musiKk.Tokenizer.TokenType;
 
-public class Runner {
+public class Runner implements ConfigReader.ConfigTarget {
 
     Map<Path, RuntimeFile> runtimeFiles = new HashMap<>();
+    private List<String> lookupPath = new ArrayList<>();
+
+    @Override
+    public void setLookupPath(List<String> lookupPath) {
+        this.lookupPath = lookupPath;
+    }
 
     public static void main(String[] args) {
         var runner = new Runner();
+        ConfigReader.readConfig().applyConfig(runner);
+
         var mainStackFrame = new StackFrame();
         var runtimeFile = runner.getOrInitRuntimeFile("main", "test.tst", mainStackFrame);
         var main = runtimeFile.scope.getVariable("main");
@@ -27,12 +35,21 @@ public class Runner {
     }
 
     private RuntimeFile getOrInitRuntimeFile(String moduleName, String pathString, StackFrame frame) {
-        var path = Path.of(pathString);
-        if (!runtimeFiles.containsKey(path)) {
-            var runtimeFile = initRuntimeFile(moduleName, path, frame.pushFrame(new Scope()));
-            runtimeFiles.put(path, runtimeFile);
+        var resolvedPath = Path.of(pathString);
+        if (!resolvedPath.isAbsolute()) {
+            for (String lookupPathEntry : lookupPath) {
+                var path = Path.of(lookupPathEntry, pathString);
+                if (Files.isRegularFile(path)) {
+                    resolvedPath = path;
+                    break;
+                }
+            }
         }
-        return runtimeFiles.get(path);
+        if (!runtimeFiles.containsKey(resolvedPath)) {
+            var runtimeFile = initRuntimeFile(moduleName, resolvedPath, frame.pushFrame(new Scope()));
+            runtimeFiles.put(resolvedPath, runtimeFile);
+        }
+        return runtimeFiles.get(resolvedPath);
     }
 
     private void execute(List<Statement> statements, StackFrame frame) {
