@@ -22,16 +22,20 @@ public class Runner implements ConfigReader.ConfigTarget {
         this.lookupPath = lookupPath;
     }
 
+    public void runFile(String file) {
+        var mainStackFrame = new StackFrame();
+        var runtimeFile = this.getOrInitRuntimeFile("main", file, mainStackFrame);
+        var main = runtimeFile.scope.getVariable("main");
+        if (main != null && main.variable.type() == Type.FUNCTION) {
+            this.evaluateFunction(new FunctionEvaluationExpression("main", List.of()), new StackFrame(null, main.scope));
+        }
+
+    }
+
     public static void main(String[] args) {
         var runner = new Runner();
         ConfigReader.readConfig().applyConfig(runner);
-
-        var mainStackFrame = new StackFrame();
-        var runtimeFile = runner.getOrInitRuntimeFile("main", "test.tst", mainStackFrame);
-        var main = runtimeFile.scope.getVariable("main");
-        if (main != null && main.variable.type() == Type.FUNCTION) {
-            runner.evaluateFunction(new FunctionEvaluationExpression("main", List.of()), new StackFrame(null, main.scope));
-        }
+        runner.runFile("test.tst");
     }
 
     private RuntimeFile getOrInitRuntimeFile(String moduleName, String pathString, StackFrame frame) {
