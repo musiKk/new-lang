@@ -26,7 +26,7 @@ public class Runner implements ConfigReader.ConfigTarget {
         var mainStackFrame = new StackFrame();
         var runtimeFile = this.getOrInitRuntimeFile("main", file, mainStackFrame);
         var main = runtimeFile.scope.getVariable("main");
-        if (main != null && main.variable.type() == Type.FUNCTION) {
+        if (main != null && main.variable.type() instanceof FunctionType) {
             this.evaluateFunction(new FunctionEvaluationExpression("main", List.of()), new StackFrame(null, main.scope));
         }
 
@@ -235,11 +235,49 @@ public class Runner implements ConfigReader.ConfigTarget {
         });
 
         int firstIndex = optTarget.isPresent() && optTarget.get() instanceof UfcsTarget ? 1 : 0;
+        Map<String, Map<String, TraitDefinition>> passedTraits = new HashMap<>();
         for (int i = firstIndex; i < fe.arguments().size(); i++) {
             var argument = fe.arguments().get(i);
             var value = evaluateExpression(argument, frame);
-            var name = parameters.get(i).name();
+
+            var parameter = parameters.get(i);
+
+            var name = parameter.name();
             newStackFrame.putVariable(name, new Variable(value));
+
+            // collect traits
+            if (!(value.type() instanceof DataType dataType)) {
+                continue;
+            }
+
+            if (parameter.typeName().isPresent()) {
+                try {
+                    var scopedVariable = frame.getVariable(parameter.typeName().get());
+                    if (scopedVariable.variable.value instanceof TraitValue traitValue) {
+                        var traitDefinition = traitValue.traitDefinition;
+                        // passedTraits.put(parameter.typeName.get(), traitDefinition);
+                        passedTraits.computeIfAbsent(parameter.typeName.get(), __ -> new HashMap<>())
+                                .put(dataType.name(), traitDefinition);
+                    }
+                } catch (SymbolNotFoundException e) {
+                    // ignore
+                }
+            }
+        }
+
+        for (var traitImplementation : passedTraits.values()) {
+            for (var traitImplEntry : traitImplementation.entrySet()) {
+                var implementingTypeName = traitImplEntry.getKey();
+                var trait = traitImplEntry.getValue();
+
+                for (var functionSignature : trait.functionSignatures()) {
+                    var functionName = functionSignature.name();
+                    var sourceLookupName = implementingTypeName + "." + functionName;
+                    var targetLookupName = trait.name() + "." + functionName;
+                    var implementingFunction = frame.getVariable(sourceLookupName);
+                    newStackFrame.putVariable(targetLookupName, new Variable(implementingFunction.variable.value));
+                }
+            }
         }
 
         return switch (function) {
@@ -286,8 +324,29 @@ public class Runner implements ConfigReader.ConfigTarget {
                 processDataDefinition(dd, frame.scope);
                 yield null;
             }
+            case TraitDefinition td -> {
+                processTraitDefinition(td, frame.scope);
+                yield null;
+            }
+            case TraitImplementation ti -> {
+                processTraitImplementation(ti, frame.scope);
+                yield null;
+            }
             default -> throw new RuntimeException("not yet implemented " + expression);
         };
+    }
+
+    private void processTraitImplementation(TraitImplementation ti, Scope scope) {
+        ti.functionDeclarations().forEach(functionDeclaration -> {
+            var functionName = functionDeclaration.signature().name();
+            var lookupName = ti.typeName() + "." + functionName;
+            var function = Function.of(ti.traitName(), functionDeclaration, scope);
+            scope.putVariable(lookupName, new Variable(new FunctionType(functionName), function));
+        });
+    }
+
+    private void processTraitDefinition(TraitDefinition td, Scope scope) {
+        scope.putVariable(td.name(), new Variable(new TraitType(td.name()), new TraitValue(td)));
     }
 
     private void processImport(Import imp, StackFrame frame) {
@@ -330,7 +389,7 @@ public class Runner implements ConfigReader.ConfigTarget {
                 default -> functionName;
             };
             var function = Function.of(moduleName, functionDeclaration, runtimeFile.scope());
-            frame.putVariable(lookupName, new Variable(Type.FUNCTION, function));
+            frame.putVariable(lookupName, new Variable(new FunctionType(functionName), function));
         });
         processingResult.variableDeclarations().forEach((name, variableDeclaration) -> {
             execute(variableDeclaration, frame);
@@ -372,7 +431,7 @@ public class Runner implements ConfigReader.ConfigTarget {
         scope.putVariable(
             dataDefinition.name(),
             new Variable(
-                Type.DATA_CREATION_FUNCTION,
+                new FunctionType(dataDefinition.name()),
                 DataCreationFunction.of(dataDefinition, scope)));
     }
 
@@ -503,7 +562,12 @@ public class Runner implements ConfigReader.ConfigTarget {
     }
     public record Data(String typeName, Map<String, Value> variables) implements Value {
         public Type type() {
-            return Type.DATA;
+            return new DataType(typeName);
+        }
+    }
+    public record TraitValue(TraitDefinition traitDefinition) implements Value {
+        public Type type() {
+            return new TraitType(traitDefinition.name());
         }
     }
     public record BooleanValue(boolean value) implements Value {
@@ -531,7 +595,7 @@ public class Runner implements ConfigReader.ConfigTarget {
         }
         static List<Parameter> mapParameters(List<VariableDeclaration> variableDeclarations) {
             return variableDeclarations.stream()
-                    .map(varDecl -> new Parameter(varDecl.name(), varDecl.type().map(Type::of), varDecl.initializer()))
+                    .map(varDecl -> new Parameter(varDecl.name(), varDecl.type(), varDecl.initializer()))
                     .toList();
         }
     }
@@ -550,18 +614,18 @@ public class Runner implements ConfigReader.ConfigTarget {
                 scope);
         }
         public Type type() {
-            return Type.FUNCTION;
+            return new FunctionType(name);
         }
     }
     record DataCreationFunction(String name, List<Parameter> parameters, Scope scope) implements Function {
         static DataCreationFunction of(DataDefinition dataDefinition, Scope scope) {
             var parameters = dataDefinition.variableDeclarations().stream()
-                    .map(varDecl -> new Parameter(varDecl.name(), Type.of(varDecl.type().get())))
+                    .map(varDecl -> new Parameter(varDecl.name(), varDecl.type().get()))
                     .toList();
             return new DataCreationFunction(dataDefinition.name(), parameters, scope);
         }
         public Type type() {
-            return Type.DATA_CREATION_FUNCTION;
+            return new FunctionType(name);
         }
     }
 
@@ -575,27 +639,29 @@ public class Runner implements ConfigReader.ConfigTarget {
         }
     }
 
-    enum Type {
-        NUMBER,
-        STRING,
-        BOOLEAN,
-        DATA,
-        DATA_DEFINITION,
-        DATA_CREATION_FUNCTION,
-        FUNCTION,
-        NATIVE_FUNCTION;
+    sealed interface Type {
+        public static final Type NUMBER = new NumberType();
+        public static final Type STRING = new StringType();
+        public static final Type BOOLEAN = new BooleanType();
         static Type of(String descriptor) {
             return switch (descriptor) {
                 case "Int" -> NUMBER;
                 case "String" -> STRING;
                 case "Boolean" -> BOOLEAN;
-                default -> DATA;
+                default -> throw new RuntimeException("cannot deduce dynamic type from " + descriptor);
             };
         }
     }
-    record Parameter(String name, Optional<Type> value, Optional<Expression> initializer) {
-        public Parameter(String name, Type value) {
-            this(name, Optional.of(value), Optional.empty());
+    record NumberType() implements Type {}
+    record StringType() implements Type {}
+    record BooleanType() implements Type {}
+    record DataType(String name) implements Type {}
+    record TraitType(String name) implements Type {}
+    record FunctionType(String name) implements Type {}
+
+    record Parameter(String name, Optional<String> typeName, Optional<Expression> initializer) {
+        public Parameter(String name, String typeName) {
+            this(name, Optional.of(typeName), Optional.empty());
         }
     }
 
@@ -622,7 +688,7 @@ public class Runner implements ConfigReader.ConfigTarget {
             }
         }
         public Type type() {
-            return Type.NATIVE_FUNCTION;
+            return new FunctionType(name);
         }
     }
 

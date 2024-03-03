@@ -30,6 +30,8 @@ public class Parser {
         return switch (token.type()) {
             case IMPORT -> parseImportStatement(tokens);
             case DATA -> parseDataDefinition(tokens);
+            case TRAIT -> parseTraitDefinition(tokens);
+            case IMPL -> parseTraitImplementation(tokens);
             case DEF -> parseFunctionDeclaration(tokens);
             case NATIVE -> parseNativeFunctionDeclaration(tokens);
             case VAR -> {
@@ -44,6 +46,40 @@ public class Parser {
         tokens.next(TokenType.IMPORT);
         var nameToken = tokens.next(TokenType.IDENTIFIER);
         return new Import(nameToken.image());
+    }
+
+    // <> impl typeName is traitName { [functionDeclaration]* }
+    private TraitImplementation parseTraitImplementation(Tokens tokens) {
+        tokens.next(TokenType.IMPL);
+        var typeNameToken = tokens.next(TokenType.IDENTIFIER);
+        tokens.next(TokenType.IS);
+        var traitNameToken = tokens.next(TokenType.IDENTIFIER);
+        tokens.next(TokenType.LBRACE);
+
+        List<FunctionDeclaration> functionDeclarations = new ArrayList<>();
+
+        while (tokens.matches(TokenType.DEF)) {
+            functionDeclarations.add(parseFunctionDeclaration(tokens));
+        }
+
+        tokens.next(TokenType.RBRACE);
+        return new TraitImplementation(typeNameToken.image(), traitNameToken.image(), functionDeclarations);
+    }
+
+    private TraitDefinition parseTraitDefinition(Tokens tokens) {
+        tokens.next(TokenType.TRAIT);
+        var nameToken = tokens.next(TokenType.IDENTIFIER);
+        tokens.next(TokenType.LBRACE);
+
+        List<FunctionSignature> signatures = new ArrayList<>();
+
+        while (!tokens.matches(TokenType.RBRACE)) {
+            signatures.add(parseFunctionSignature(tokens));
+        }
+
+        tokens.next(TokenType.RBRACE);
+
+        return new TraitDefinition(nameToken.image(), signatures);
     }
 
     private DataDefinition parseDataDefinition(Tokens tokens) {
