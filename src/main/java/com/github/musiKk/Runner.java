@@ -324,8 +324,8 @@ public class Runner implements ConfigReader.ConfigTarget {
             processDataDefinition(dataDefinition, frame.scope);
         });
         processingResult.functionDeclarations().forEach((__, functionDeclaration) -> {
-            var functionName = functionDeclaration.name();
-            var lookupName = switch (functionDeclaration.receiver()) {
+            var functionName = functionDeclaration.signature().name();
+            var lookupName = switch (functionDeclaration.signature().receiver()) {
                 case FunctionReceiverVariable(String name) -> name + "." + functionName;
                 default -> functionName;
             };
@@ -359,7 +359,7 @@ public class Runner implements ConfigReader.ConfigTarget {
             return this;
         }
         CompilationUnitProcessingResult addFunctionDeclaration(FunctionDeclaration functionDeclaration) {
-            functionDeclarations.put(functionDeclaration.name(), functionDeclaration);
+            functionDeclarations.put(functionDeclaration.signature().name(), functionDeclaration);
             return this;
         }
         CompilationUnitProcessingResult addVariableDeclaration(VariableDeclaration variableDeclaration) {
@@ -522,7 +522,7 @@ public class Runner implements ConfigReader.ConfigTarget {
         }
 
         static Function of(String moduleName, FunctionDeclaration functionDeclaration, Scope scope) {
-            var parameters = mapParameters(functionDeclaration.parameters());
+            var parameters = mapParameters(functionDeclaration.signature().parameters());
             return switch (functionDeclaration) {
                 case UserFunctionDeclaration ufd -> UserFunction.of(ufd, parameters, scope);
                 case NativeFunctionDeclaration nfd -> NativeFunction.of(nfd, parameters, scope, moduleName);
@@ -538,13 +538,13 @@ public class Runner implements ConfigReader.ConfigTarget {
 
     record UserFunction(Optional<String> receiver, String name, List<Parameter> parameters, Expression body, Scope scope) implements Function {
         static UserFunction of(UserFunctionDeclaration functionDeclaration, List<Parameter> parameters, Scope scope) {
-            Optional<String> receiver = switch (functionDeclaration.receiver()) {
+            Optional<String> receiver = switch (functionDeclaration.signature().receiver()) {
                 case FunctionReceiverVariable(String name) -> Optional.of(name);
                 default -> Optional.empty();
             };
             return new UserFunction(
                 receiver,
-                functionDeclaration.name(),
+                functionDeclaration.signature().name(),
                 parameters,
                 functionDeclaration.body(),
                 scope);
@@ -609,14 +609,14 @@ public class Runner implements ConfigReader.ConfigTarget {
                     @Override
                     public Value call(StackFrame stackFrame) {
                         try {
-                            var method = cls.getMethod(nfd.name(), StackFrame.class);
+                            var method = cls.getMethod(nfd.signature().name(), StackFrame.class);
                             return (Value) method.invoke(moduleInstance, stackFrame);
                         } catch (NoSuchMethodException | SecurityException | IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
                             throw new RuntimeException(e);
                         }
                     }
                 };
-                return new NativeFunction(nfd.name(), parameters, scope, handle);
+                return new NativeFunction(nfd.signature().name(), parameters, scope, handle);
             } catch (ClassNotFoundException | InstantiationException | IllegalAccessException | IllegalArgumentException | InvocationTargetException | NoSuchMethodException | SecurityException e) {
                 throw new RuntimeException(e);
             }

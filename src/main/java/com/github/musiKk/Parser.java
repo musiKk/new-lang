@@ -69,46 +69,8 @@ public class Parser {
         return new DataDefinition(nameToken.image(), variableDeclarations);
     }
 
-    // <> native def name "(" parameters* ")"
-    private NativeFunctionDeclaration parseNativeFunctionDeclaration(Tokens tokens) {
-        tokens.next(TokenType.NATIVE);
-        tokens.next(TokenType.DEF);
-
-        var nameToken = tokens.next(TokenType.IDENTIFIER);
-
-        List<VariableDeclaration> parameters = new ArrayList<>();
-        tokens.next(TokenType.LPAREN);
-        var maybeParameter = tokens.peek();
-        if (!tokens.matches(TokenType.RPAREN)) {
-            var variableDeclaration = parseVariableDeclaration(tokens);
-            parameters.add(variableDeclaration);
-            while (tokens.matches(TokenType.COMMA)) {
-                maybeParameter = tokens.peek();
-                if (maybeParameter.type() == TokenType.RPAREN) {
-                    tokens.next();
-                    break;
-                }
-                tokens.next(TokenType.COMMA);
-                variableDeclaration = parseVariableDeclaration(tokens);
-                parameters.add(variableDeclaration);
-            }
-        }
-        tokens.next(TokenType.RPAREN);
-        var token = tokens.peek();
-
-        String returnType;
-        if (token.type() == TokenType.COLON) {
-            tokens.next(TokenType.COLON);
-            var typeToken = tokens.next(TokenType.IDENTIFIER);
-            returnType = typeToken.image();
-        } else {
-            returnType = "void";
-        }
-        return new NativeFunctionDeclaration(nameToken.image(), parameters, returnType);
-    }
-
-    // <> def receiver? . name "(" parameters* ")" (":" type)? "=" expression
-    private UserFunctionDeclaration parseFunctionDeclaration(Tokens tokens) {
+    // <> def name "(" parameters* ") [: type]?"
+    private FunctionSignature parseFunctionSignature(Tokens tokens) {
         tokens.next(TokenType.DEF);
         var nameToken = tokens.next(TokenType.IDENTIFIER);
 
@@ -123,36 +85,40 @@ public class Parser {
 
         List<VariableDeclaration> parameters = new ArrayList<>();
         tokens.next(TokenType.LPAREN);
-        var maybeParameter = tokens.peek();
-        if (!tokens.matches(TokenType.RPAREN)) {
+        while (!tokens.matches(TokenType.RPAREN)) {
             var variableDeclaration = parseVariableDeclaration(tokens);
             parameters.add(variableDeclaration);
-            while (tokens.matches(TokenType.COMMA)) {
-                maybeParameter = tokens.peek();
-                if (maybeParameter.type() == TokenType.RPAREN) {
-                    tokens.next();
-                    break;
-                }
+            if (tokens.matches(TokenType.COMMA)) {
                 tokens.next(TokenType.COMMA);
-                variableDeclaration = parseVariableDeclaration(tokens);
-                parameters.add(variableDeclaration);
             }
         }
         tokens.next(TokenType.RPAREN);
-        var token = tokens.peek();
 
         String returnType;
-        if (token.type() == TokenType.COLON) {
+        if (tokens.matches(TokenType.COLON)) {
             tokens.next(TokenType.COLON);
             var typeToken = tokens.next(TokenType.IDENTIFIER);
             returnType = typeToken.image();
         } else {
             returnType = "void";
         }
+        return new FunctionSignature(receiver, nameToken.image(), parameters, returnType);
+    }
+
+    // <> native def name "(" parameters* ") [: type]?"
+    private NativeFunctionDeclaration parseNativeFunctionDeclaration(Tokens tokens) {
+        tokens.next(TokenType.NATIVE);
+        var functionSignature = parseFunctionSignature(tokens);
+        return new NativeFunctionDeclaration(functionSignature);
+    }
+
+    // <> def (receiver .)? name "(" parameters* ")" (":" type)? "=" expression
+    private UserFunctionDeclaration parseFunctionDeclaration(Tokens tokens) {
+        var functionSignature = parseFunctionSignature(tokens);
         tokens.next(TokenType.EQUALS);
 
         var body = parseExpression(tokens);
-        return new UserFunctionDeclaration(receiver, nameToken.image(), parameters, returnType, body);
+        return new UserFunctionDeclaration(functionSignature, body);
     }
 
     private VariableDeclaration parseVariableDeclaration(Tokens tokens) {
@@ -343,13 +309,16 @@ public class Parser {
             "var x = 1", new VariableDeclaration("x", new NumberExpression(1))));
         testCases.add(new StatementTestCase(
             "def foo() = {}",
-            new UserFunctionDeclaration(StandaloneFunctionReceiver.get(), "foo", List.of(), "void", new BlockExpression(List.of()))));
+            new UserFunctionDeclaration(new FunctionSignature(StandaloneFunctionReceiver.get(), "foo", List.of(), "void"), new BlockExpression(List.of()))));
         testCases.add(new StatementTestCase(
             "def foo(i) = {}",
-            new UserFunctionDeclaration(StandaloneFunctionReceiver.get(), "foo", List.of(new VariableDeclaration("i")), "void", new BlockExpression(List.of()))));
+            new UserFunctionDeclaration(new FunctionSignature(StandaloneFunctionReceiver.get(), "foo", List.of(new VariableDeclaration("i")), "void"), new BlockExpression(List.of()))));
         testCases.add(new StatementTestCase(
             "def Foo.foo() = {}",
-            new UserFunctionDeclaration(new FunctionReceiverVariable("Foo"), "foo", List.of(), "void", new BlockExpression(List.of()))));
+            new UserFunctionDeclaration(new FunctionSignature(new FunctionReceiverVariable("Foo"), "foo", List.of(), "void"), new BlockExpression(List.of()))));
+        testCases.add(new StatementTestCase(
+            "trait Dog { def bark() }",
+            new TraitDefinition("Dog", List.of(new FunctionSignature(StandaloneFunctionReceiver.get(), "bark", List.of(), "void")))));
         testCases.add(new ExpressionTestCase(
             "foo()",
             new FunctionEvaluationExpression("foo", List.of())));
@@ -543,24 +512,14 @@ record IfExpression(
 record Import(String name) implements Statement {}
 
 sealed interface FunctionDeclaration extends Statement {
-    String name();
-    List<VariableDeclaration> parameters();
-    FunctionReceiverType receiver();
+    FunctionSignature signature();
 }
 record NativeFunctionDeclaration(
-    String name,
-    List<VariableDeclaration> parameters,
-    String returnType
+    FunctionSignature signature
 ) implements FunctionDeclaration {
-    public FunctionReceiverType receiver() {
-        return StandaloneFunctionReceiver.get();
-    }
 }
 record UserFunctionDeclaration(
-    FunctionReceiverType receiver,
-    String name,
-    List<VariableDeclaration> parameters,
-    String returnType,
+    FunctionSignature signature,
     Expression body
 ) implements FunctionDeclaration {}
 record VariableDeclaration(
@@ -581,10 +540,28 @@ record VariableDeclaration(
         this(name, Optional.empty(), Optional.of(initializer));
     }
 }
+
+record FunctionSignature(
+    FunctionReceiverType receiver,
+    String name,
+    List<VariableDeclaration> parameters,
+    String returnType
+) {}
+
 record DataDefinition(
     String name,
     List<VariableDeclaration> variableDeclarations
 ) implements Statement {}
+record TraitDefinition(
+    String name,
+    List<FunctionSignature> functionSignatures
+) implements Statement {}
+record TraitImplementation(
+    String typeName,
+    String traitName,
+    List<FunctionDeclaration> functionDeclarations
+) implements Statement {}
+
 record CompilationUnit(
     List<Statement> statements
 ) {}
