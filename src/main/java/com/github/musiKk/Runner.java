@@ -67,15 +67,13 @@ public class Runner implements ConfigReader.ConfigTarget {
             case NumberExpression ne -> new NumberValue(ne.number());
             case StringExpression se -> new StringValue(se.string());
             case VariableExpression ve -> {
-                var optTarget = ve.target();
-                Optional<Value> optReceiver = optTarget.map(t -> evaluateExpression(t, frame));
-                yield optReceiver.map(receiver -> {
-                    if (receiver instanceof Data dv) {
-                        return dv.variables().get(ve.name());
-                    } else {
-                        throw new RuntimeException("cannot look up fields in values " + receiver);
-                    }
-                }).orElse(frame.getVariable(ve.name()).variable.value());
+                yield ve.target()
+                    .map(target -> evaluateExpression(target, frame))
+                    .map(receiver -> switch (receiver) {
+                        case Data d -> d.variables().get(ve.name());
+                        default -> throw new RuntimeException("cannot look up fields in values " + receiver);
+                    })
+                    .orElseGet(() -> frame.getVariable(ve.name()).variable.value);
             }
             case FunctionEvaluationExpression fe -> {
                 yield evaluateFunction(fe, frame);
