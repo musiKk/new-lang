@@ -332,6 +332,9 @@ public class Runner implements ConfigReader.ConfigTarget {
                 processTraitImplementation(ti, frame.scope);
                 yield null;
             }
+            case FunctionDeclaration functionDeclaration -> {
+                yield registerFunction(functionDeclaration, frame.scope(), "");
+            }
             default -> throw new RuntimeException("not yet implemented " + expression);
         };
     }
@@ -383,13 +386,7 @@ public class Runner implements ConfigReader.ConfigTarget {
             processDataDefinition(dataDefinition, frame.scope);
         });
         processingResult.functionDeclarations().forEach((__, functionDeclaration) -> {
-            var functionName = functionDeclaration.signature().name();
-            var lookupName = switch (functionDeclaration.signature().receiver()) {
-                case FunctionReceiverVariable(String name) -> name + "." + functionName;
-                default -> functionName;
-            };
-            var function = Function.of(moduleName, functionDeclaration, runtimeFile.scope());
-            frame.putVariable(lookupName, new Variable(new FunctionType(functionName), function));
+            registerFunction(functionDeclaration, frame.scope, moduleName);
         });
         processingResult.variableDeclarations().forEach((name, variableDeclaration) -> {
             execute(variableDeclaration, frame);
@@ -425,6 +422,17 @@ public class Runner implements ConfigReader.ConfigTarget {
             variableDeclarations.put(variableDeclaration.name(), variableDeclaration);
             return this;
         }
+    }
+
+    static Function registerFunction(FunctionDeclaration functionDeclaration, Scope scope, String moduleName) {
+        var functionName = functionDeclaration.signature().name();
+        var lookupName = switch (functionDeclaration.signature().receiver()) {
+            case FunctionReceiverVariable(String name) -> name + "." + functionName;
+            default -> functionName;
+        };
+        var function = Function.of(moduleName, functionDeclaration, scope);
+        scope.putVariable(lookupName, new Variable(new FunctionType(functionName), function));
+        return function;
     }
 
     static void processDataDefinition(DataDefinition dataDefinition, Scope scope) {
