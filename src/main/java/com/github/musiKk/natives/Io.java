@@ -5,6 +5,7 @@ import java.util.stream.Collectors;
 import com.github.musiKk.Runner;
 import com.github.musiKk.Runner.BooleanValue;
 import com.github.musiKk.Runner.Data;
+import com.github.musiKk.Runner.NullValue;
 import com.github.musiKk.Runner.NumberValue;
 import com.github.musiKk.Runner.StringValue;
 import com.github.musiKk.Runner.Value;
@@ -19,7 +20,7 @@ public class Io {
     }
     static String stringify(Value value) {
         return switch (value) {
-            case null -> "null";
+            case NullValue __ -> "null";
             case NumberValue nv -> String.valueOf(nv.number());
             case BooleanValue bv -> String.valueOf(bv.value());
             case StringValue sv -> sv.string();

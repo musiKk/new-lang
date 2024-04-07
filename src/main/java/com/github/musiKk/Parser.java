@@ -230,6 +230,14 @@ public class Parser {
         var token = tokens.peek();
 
         var expression = switch (token.type()) {
+            case NULL -> {
+                tokens.next();
+                yield new NullExpression();
+            }
+            case TRUE, FALSE -> {
+                var booleanToken = tokens.next();
+                yield new BooleanExpression(booleanToken.type() == TokenType.TRUE);
+            }
             case IDENTIFIER -> parseNameExpression(tokens);
             case NUMBER -> {
                 var numberToken = tokens.next();
@@ -485,6 +493,10 @@ record ExpressionStatement(
 
 sealed interface Expression {}
 
+record NullExpression() implements Expression {}
+record BooleanExpression(
+    boolean value
+) implements Expression {}
 record AssignmentExpression(
     VariableExpression target,
     Expression value

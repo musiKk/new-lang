@@ -180,6 +180,8 @@ public class Tokenizer {
 
         IF("if"), ELSE("else"),
 
+        NULL("null"),
+        TRUE("true"), FALSE("false"),
         NUMBER,
         STRING,
 

@@ -66,6 +66,8 @@ public class Runner implements ConfigReader.ConfigTarget {
         return switch (expression) {
             case NumberExpression ne -> new NumberValue(ne.number());
             case StringExpression se -> new StringValue(se.string());
+            case BooleanExpression be -> be.value() ? True : False;
+            case NullExpression __ -> Null;
             case VariableExpression ve -> {
                 yield ve.target()
                     .map(target -> evaluateExpression(target, frame))
@@ -81,7 +83,7 @@ public class Runner implements ConfigReader.ConfigTarget {
             case BlockExpression be -> {
                 frame.pushScope();
                 try {
-                    Value result = null;
+                    Value result = Null;
                     for (var statement : be.statements()) {
                         result = execute(statement, frame);
                     }
@@ -155,7 +157,7 @@ public class Runner implements ConfigReader.ConfigTarget {
                     if (bv.value()) {
                         yield evaluateExpression(ie.thenBranch(), frame);
                     } else {
-                        yield ie.elseBranch().map(elseExpression -> evaluateExpression(elseExpression, frame)).orElse(null);
+                        yield ie.elseBranch().map(elseExpression -> evaluateExpression(elseExpression, frame)).orElse(Null);
                     }
                 } else {
                     throw new RuntimeException("condition must be a boolean");
@@ -313,24 +315,24 @@ public class Runner implements ConfigReader.ConfigTarget {
             case ExpressionStatement es -> evaluateExpression(es.expression(), frame);
             case VariableDeclaration vds -> {
                 var optValue = vds.initializer().map(initializer -> evaluateExpression(initializer, frame));
-                frame.putVariable(vds.name(), new Variable(optValue.orElse(null)));
-                yield null;
+                frame.putVariable(vds.name(), new Variable(optValue.orElse(Null)));
+                yield Null;
             }
             case Import imp -> {
                 processImport(imp, frame);
-                yield null;
+                yield Null;
             }
             case DataDefinition dd -> {
                 processDataDefinition(dd, frame.scope);
-                yield null;
+                yield Null;
             }
             case TraitDefinition td -> {
                 processTraitDefinition(td, frame.scope);
-                yield null;
+                yield Null;
             }
             case TraitImplementation ti -> {
                 processTraitImplementation(ti, frame.scope);
-                yield null;
+                yield Null;
             }
             case FunctionDeclaration functionDeclaration -> {
                 yield registerFunction(functionDeclaration, frame.scope(), "");
@@ -583,6 +585,12 @@ public class Runner implements ConfigReader.ConfigTarget {
             return Type.BOOLEAN;
         }
     }
+    public record NullValue() implements Value {
+        public Type type() {
+            return Type.NULL;
+        }
+    }
+    public static Value Null = new NullValue();
     public static Value True = new BooleanValue(true);
     public static Value False = new BooleanValue(false);
 
@@ -651,6 +659,7 @@ public class Runner implements ConfigReader.ConfigTarget {
         public static final Type NUMBER = new NumberType();
         public static final Type STRING = new StringType();
         public static final Type BOOLEAN = new BooleanType();
+        public static final Type NULL = new NullType();
         static Type of(String descriptor) {
             return switch (descriptor) {
                 case "Int" -> NUMBER;
@@ -660,6 +669,7 @@ public class Runner implements ConfigReader.ConfigTarget {
             };
         }
     }
+    record NullType() implements Type {}
     record NumberType() implements Type {}
     record StringType() implements Type {}
     record BooleanType() implements Type {}
