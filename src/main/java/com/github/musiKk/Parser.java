@@ -254,23 +254,55 @@ public class Parser {
                 tokens.next(TokenType.RPAREN);
                 yield e;
             }
+            case LBRACKET -> {
+                tokens.next(TokenType.LBRACKET);
+                var lengthExpression = Optional.<Expression>empty();
+                if (!tokens.matches(TokenType.RBRACKET)) {
+                    lengthExpression = Optional.of(parseExpression(tokens));
+                }
+                tokens.next(TokenType.RBRACKET);
+                var typeName = tokens.next(TokenType.IDENTIFIER);
+                tokens.next(TokenType.LPAREN);
+                List<Expression> initializations = new ArrayList<>();
+                while (!tokens.matches(TokenType.RPAREN)) {
+                    initializations.add(parseExpression(tokens));
+                    if (tokens.matches(TokenType.COMMA)) {
+                        tokens.next(TokenType.COMMA);
+                    }
+                }
+                tokens.next(TokenType.RPAREN);
+                yield new ArrayCreationExpression(typeName.image(), lengthExpression, initializations);
+            }
             case IF -> parseIfExpression(tokens);
             default -> throw new RuntimeException("Unexpected token: " + token);
         };
 
-        while (tokens.matches(TokenType.DOT)) {
-            tokens.next();
-            var invocation = parseNameExpression(tokens);
-            expression = switch (invocation) {
-                case VariableExpression ve -> {
-                    yield new VariableExpression(expression, ve.name());
+        while (tokens.matches(TokenType.DOT, TokenType.LBRACKET)) {
+            var postfixToken = tokens.next();
+            expression = switch (postfixToken.type()) {
+                case TokenType.DOT -> {
+                    var invocation = parseNameExpression(tokens);
+                    var dotExpression = switch (invocation) {
+                        case VariableExpression ve -> {
+                            yield new VariableExpression(expression, ve.name());
+                        }
+                        case FunctionEvaluationExpression fee -> {
+                            yield new FunctionEvaluationExpression(expression, fee.name(), fee.arguments());
+                        }
+                        default -> throw new RuntimeException("Unexpected parse: " + invocation);
+                    };
+                    yield dotExpression;
                 }
-                case FunctionEvaluationExpression fee -> {
-                    yield new FunctionEvaluationExpression(expression, fee.name(), fee.arguments());
+                case TokenType.LBRACKET -> {
+                    var indexExpression = parseExpression(tokens);
+                    tokens.next(TokenType.RBRACKET);
+                    yield new ArrayLookupExpression(expression, indexExpression);
                 }
-                default -> throw new RuntimeException("Unexpected parse: " + invocation);
+                default -> throw new RuntimeException("Unexpected token " + postfixToken);
             };
         }
+
+
         return expression;
     }
 
@@ -435,6 +467,40 @@ public class Parser {
             new AssignmentExpression(
                 new VariableExpression("b"),
                 new VariableExpression("c")))));
+        testCases.add(new ExpressionTestCase(
+            "[]int()",
+            new ArrayCreationExpression("int", Optional.empty(), List.of())));
+        testCases.add(new ExpressionTestCase(
+            "[1]int()",
+            new ArrayCreationExpression("int", Optional.of(new NumberExpression(1)), List.of())));
+        testCases.add(new ExpressionTestCase(
+            "[arr.len]int()",
+            new ArrayCreationExpression("int", Optional.of(new VariableExpression(new VariableExpression("arr"), "len")), List.of())));
+        testCases.add(new ExpressionTestCase(
+            "[]int(2, 3)",
+            new ArrayCreationExpression("int", Optional.empty(), List.of(new NumberExpression(2), new NumberExpression(3)))));
+        testCases.add(new ExpressionTestCase(
+            "arr[1]", new ArrayLookupExpression(new VariableExpression("arr"), new NumberExpression(1))));
+        testCases.add(new ExpressionTestCase(
+            "arr[1][2]",
+            new ArrayLookupExpression(
+                new ArrayLookupExpression(new VariableExpression("arr"), new NumberExpression(1)),
+                new NumberExpression(2))));
+        testCases.add(new ExpressionTestCase(
+            "arr[1].foo",
+            new VariableExpression(
+                new ArrayLookupExpression(new VariableExpression("arr"), new NumberExpression(1)),
+                "foo")));
+        testCases.add(new ExpressionTestCase(
+            "arr[1].foo()",
+            new FunctionEvaluationExpression(
+                new ArrayLookupExpression(new VariableExpression("arr"), new NumberExpression(1)),
+                "foo",
+                List.of())));
+        testCases.add(new ExpressionTestCase(
+            "foo()[1]", new ArrayLookupExpression(
+                new FunctionEvaluationExpression("foo", List.of()),
+                new NumberExpression(1))));
 
         for (var testCase : testCases) {
             System.err.printf("%-30s", testCase.input());
@@ -555,6 +621,17 @@ record IfExpression(
     Expression condition,
     Expression thenBranch,
     Optional<Expression> elseBranch
+) implements Expression {}
+
+record ArrayCreationExpression(
+    String typeName,
+    Optional<Expression> lengthExpression,
+    List<Expression> initializations
+) implements Expression {}
+
+record ArrayLookupExpression(
+    Expression target,
+    Expression indexExpression
 ) implements Expression {}
 
 record Import(String name) implements Statement {}

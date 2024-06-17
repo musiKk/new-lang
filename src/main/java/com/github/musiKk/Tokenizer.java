@@ -196,6 +196,8 @@ public class Tokenizer {
         RBRACE("}"),
         LPAREN("("),
         RPAREN(")"),
+        LBRACKET("["),
+        RBRACKET("]"),
 
         COLON(":"),
         EQUALS("="),
