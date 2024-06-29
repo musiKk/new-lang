@@ -36,6 +36,21 @@ x = 2
 x = "foo" // currently not forbidden but hopefully eventually
 ```
 
+## Arrays
+
+Arrays have a fixed length. If an initializer list is passed, the length is optional. The runner will crash if accessing out of bounds.
+
+```
+var a = []int{}         // empty
+var b = [5]int{}        // length 5
+var c = []int{1, 2, 3}  // length 3
+var d = [3]int{1, 2, 3} // redundant but fine
+var e = [5]int{1, 2, 3} // error, length must match initializer list
+
+// access and assign
+c[0] = c[1] + c[2]
+```
+
 ## Blocks
 
 A block is a grouping mechanism and allowed everywhere a statement or expression is allowed. The value of the block is the value of the last statement executed.
