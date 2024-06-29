@@ -16,6 +16,8 @@ public class ConfigReader {
             properties.load(new FileInputStream("new-lang.cfg"));
 
             Arrays.stream(properties.getProperty("lookupPath", "").split(",")).forEach(config.lookupPath::add);
+            config.target = properties.getProperty("target");
+
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -24,14 +26,17 @@ public class ConfigReader {
 
     static class Config {
         List<String> lookupPath = new ArrayList<>();
+        String target;
 
         public void applyConfig(ConfigTarget ct) {
             ct.setLookupPath(lookupPath);
+            ct.setTarget(target);
         }
     }
 
     interface ConfigTarget {
         void setLookupPath(List<String> lookupPath);
+        void setTarget(String target);
     }
 
 }
