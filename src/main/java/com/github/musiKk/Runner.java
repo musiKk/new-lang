@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import com.github.musiKk.Tokenizer.TokenType;
+import com.github.musiKk.natives.Io;
 
 public class Runner implements ConfigReader.ConfigTarget {
 
@@ -100,7 +101,7 @@ public class Runner implements ConfigReader.ConfigTarget {
                         if (left instanceof NumberValue ln && right instanceof NumberValue rn) {
                             yield new NumberValue(ln.number() + rn.number());
                         } else {
-                            yield new StringValue(left.toString() + right.toString());
+                            yield new StringValue(Io.stringify(left) + Io.stringify(right));
                         }
                     }
                     case TokenType.MINUS -> {

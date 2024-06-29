@@ -18,7 +18,7 @@ public class Io {
         System.out.println(representation);
         return null;
     }
-    static String stringify(Value value) {
+    public static String stringify(Value value) {
         return switch (value) {
             case NullValue __ -> "null";
             case NumberValue nv -> String.valueOf(nv.number());
