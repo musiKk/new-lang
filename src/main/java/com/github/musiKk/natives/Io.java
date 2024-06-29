@@ -1,8 +1,10 @@
 package com.github.musiKk.natives;
 
+import java.util.Arrays;
 import java.util.stream.Collectors;
 
 import com.github.musiKk.Runner;
+import com.github.musiKk.Runner.ArrayValue;
 import com.github.musiKk.Runner.BooleanValue;
 import com.github.musiKk.Runner.Data;
 import com.github.musiKk.Runner.NullValue;
@@ -32,6 +34,11 @@ public class Io {
                 sb.append("]");
                 yield sb.toString();
             }
+            case ArrayValue(Value[] values, String type) ->
+                "[" + values.length + "]" + type + "(" + Arrays.stream(values)
+                        .map(Io::stringify)
+                        .collect(Collectors.joining(", "))
+                + ")";
             default -> value.toString();
         };
     }

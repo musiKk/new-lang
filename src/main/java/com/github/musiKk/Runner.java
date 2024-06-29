@@ -5,6 +5,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +22,11 @@ public class Runner implements ConfigReader.ConfigTarget {
     @Override
     public void setLookupPath(List<String> lookupPath) {
         this.lookupPath = lookupPath;
+    }
+
+    @Override
+    public void setTarget(String target) {
+        // ignore
     }
 
     public void runFile(String file) {
@@ -152,6 +158,42 @@ public class Runner implements ConfigReader.ConfigTarget {
                     default -> throw new RuntimeException("not yet implemented " + be.operator());
                 };
             }
+            case ArrayCreationExpression(String typeName, Optional<Expression> lengthExpression, List<Expression> initializations) -> {
+                ArrayValue array;
+                if (lengthExpression.isPresent()) {
+                    var length = (NumberValue) evaluateExpression(lengthExpression.get(), frame);
+                    if (initializations.size() != 0 && initializations.size() != length.number()) {
+                        throw new RuntimeException("initialization size does not match length");
+                    }
+                    array = new ArrayValue((int) length.number(), typeName);
+                } else {
+                    array = new ArrayValue(initializations.size(), typeName);
+                }
+                if (initializations.isEmpty()) {
+                    Arrays.fill(array.values, Null);
+                } else {
+                    for (int i = 0; i < initializations.size(); i++) {
+                        array.values[i] = evaluateExpression(initializations.get(i), frame);
+                    }
+                }
+                yield array;
+            }
+            case ArrayLookupExpression(Expression target, Expression indexExpression) -> {
+                var targetValue = evaluateExpression(target, frame);
+                var indexValue = evaluateExpression(indexExpression, frame);
+
+                if (!(indexValue instanceof NumberValue)) {
+                    throw new RuntimeException("array index must be a number");
+                }
+
+                if (!(targetValue instanceof ArrayValue)) {
+                    throw new RuntimeException("array lookup target must be an array but is " + targetValue.getClass());
+                }
+
+                var targetArray = (ArrayValue) targetValue;
+                var index = (NumberValue) indexValue;
+                yield targetArray.values[(int) index.number];
+            }
             case IfExpression ie -> {
                 var condition = evaluateExpression(ie.condition(), frame);
                 if (condition instanceof BooleanValue bv) {
@@ -188,6 +230,25 @@ public class Runner implements ConfigReader.ConfigTarget {
                     }
                 }
                 yield rhs;
+            }
+            case ArrayAssignmentExpression(ArrayLookupExpression ale, Expression rhsExpression) -> {
+                var indexValue = evaluateExpression(ale.indexExpression(), frame);
+                if (!(indexValue instanceof NumberValue)) {
+                    throw new RuntimeException("array index must be a number");
+                }
+
+                var rhsValue = evaluateExpression(rhsExpression, frame);
+
+                var lhsValue = evaluateExpression(ale.target(), frame);
+                if (!(lhsValue instanceof ArrayValue)) {
+                    throw new RuntimeException("array assignment target must be an array but is " + lhsValue.getClass());
+                }
+
+                var index = (NumberValue) indexValue;
+                var array = (ArrayValue) lhsValue;
+                array.values[(int) index.number] = rhsValue;
+
+                yield rhsValue;
             }
             default -> throw new RuntimeException("not yet implemented " + expression);
         };
@@ -591,6 +652,14 @@ public class Runner implements ConfigReader.ConfigTarget {
             return Type.NULL;
         }
     }
+    public record ArrayValue(Value[] values, String arrayType) implements Value {
+        public ArrayValue(int length, String arrayType) {
+            this(new Value[length], arrayType);
+        }
+        public Type type() {
+            return new ArrayType(arrayType);
+        }
+    }
     public static Value Null = new NullValue();
     public static Value True = new BooleanValue(true);
     public static Value False = new BooleanValue(false);
@@ -674,6 +743,7 @@ public class Runner implements ConfigReader.ConfigTarget {
     record NumberType() implements Type {}
     record StringType() implements Type {}
     record BooleanType() implements Type {}
+    record ArrayType(String typeName) implements Type {}
     record DataType(String name) implements Type {}
     record TraitType(String name) implements Type {}
     record FunctionType(String name) implements Type {}

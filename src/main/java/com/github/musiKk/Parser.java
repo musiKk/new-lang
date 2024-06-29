@@ -182,10 +182,13 @@ public class Parser {
         var expr = parseComparison(tokens);
 
         if (tokens.matches(TokenType.EQUALS)) {
+            tokens.next();
             if (expr instanceof VariableExpression ve) {
-                tokens.next();
                 var right = parseAssignment(tokens);
                 expr = new AssignmentExpression(ve, right);
+            } else if (expr instanceof ArrayLookupExpression ale) {
+                Expression right = parseAssignment(tokens);
+                expr = new ArrayAssignmentExpression(ale, right);
             } else {
                 throw new RuntimeException("Left-hand side of assignment must be a variable");
             }
@@ -565,6 +568,10 @@ record BooleanExpression(
 ) implements Expression {}
 record AssignmentExpression(
     VariableExpression target,
+    Expression value
+) implements Expression {}
+record ArrayAssignmentExpression(
+    ArrayLookupExpression target,
     Expression value
 ) implements Expression {}
 record BlockExpression(
