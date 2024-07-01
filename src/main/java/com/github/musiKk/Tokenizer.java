@@ -76,15 +76,20 @@ public class Tokenizer {
     static class StaticPattern implements Pattern {
         String pattern;
         TokenType tokenType;
+        boolean isWord;
 
         public StaticPattern(String pattern, TokenType tokenType) {
             this.pattern = pattern;
             this.tokenType = tokenType;
+            this.isWord = pattern.matches("\\w+");
         }
 
         @Override
         public Optional<Token> match(String programString, int index) {
             if (programString.startsWith(pattern, index)) {
+                if (isWord && index + pattern.length() < programString.length() && Character.isJavaIdentifierPart(programString.charAt(index + pattern.length()))) {
+                    return Optional.empty();
+                }
                 return Optional.of(new Token(tokenType, pattern, index, index + pattern.length()));
             } else {
                 return Optional.empty();
