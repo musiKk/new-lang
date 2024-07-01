@@ -277,6 +277,7 @@ public class Parser {
                 yield new ArrayCreationExpression(typeName.image(), lengthExpression, initializations);
             }
             case IF -> parseIfExpression(tokens);
+            case FOR -> parseForExpression(tokens);
             default -> throw new RuntimeException("Unexpected token: " + token);
         };
 
@@ -319,6 +320,13 @@ public class Parser {
             elseBranch = Optional.of(parseExpression(tokens));
         }
         return new IfExpression(condition, thenBranch, elseBranch);
+    }
+
+    private Expression parseForExpression(Tokens tokens) {
+        tokens.next(TokenType.FOR);
+        var condition = parseExpression(tokens);
+        var body = parseExpression(tokens);
+        return new ForExpression(condition, body);
     }
 
     private Expression parseNameExpression(Tokens tokens) {
@@ -628,6 +636,11 @@ record IfExpression(
     Expression condition,
     Expression thenBranch,
     Optional<Expression> elseBranch
+) implements Expression {}
+
+record ForExpression(
+    Expression condition,
+    Expression body
 ) implements Expression {}
 
 record ArrayCreationExpression(

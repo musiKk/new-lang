@@ -75,12 +75,51 @@ var y = { 1 + 2 } * 3
 
 ## Control Flow
 
-There is only an if else right now.
+### If
+
+The if statement is an expression and evaluates to the path taken. Else is optional. If else is missing and the condition is false, the expression evaluates to null.
 
 ```
 var x = 1
 if (x == 1) print("x is indeed 1")
 else print("for some reason x is different: " + x)
+```
+
+### For
+
+Currently only supports the Go-style short version (otherwise known as a while loop). It evaluates to the last iteration or null if the condition is immediately false.
+
+```
+var i = 0
+for i < 5 {
+    import io
+    print(i)
+    i = i + 1
+}
+```
+
+The braces are not part of the syntax, it's a regular block.
+
+```
+def main() = {
+    var looper = Looper(5, 0, print)
+    for looper.isTrue() looper.invoke()
+}
+
+data Looper {
+    iterations: int
+    cur: int
+    function: F
+}
+
+def Looper.invoke() = {
+    // TODO: function execution does not work from fields right now
+    var f = this.function
+    f(this.cur)
+    this.cur = this.cur + 1
+}
+
+def Looper.isTrue() = this.cur < this.iterations
 ```
 
 ## Custom Data Types

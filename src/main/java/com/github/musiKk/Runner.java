@@ -206,6 +206,22 @@ public class Runner implements ConfigReader.ConfigTarget {
                     throw new RuntimeException("condition must be a boolean");
                 }
             }
+            case ForExpression(var condition, var body) -> {
+                Value result = Null;
+                while (true) {
+                    var conditionValue = evaluateExpression(condition, frame);
+                    if (conditionValue instanceof BooleanValue bv) {
+                        if (!bv.value()) {
+                            break;
+                        }
+                    } else {
+                        throw new RuntimeException("condition must be a boolean");
+                    }
+
+                    result = evaluateExpression(body, frame);
+                }
+                yield result;
+            }
             case AssignmentExpression ae -> {
                 var lhs = ae.target();
                 var rhs = evaluateExpression(ae.value(), frame);

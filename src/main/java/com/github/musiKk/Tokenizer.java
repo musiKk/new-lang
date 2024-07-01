@@ -179,6 +179,7 @@ public class Tokenizer {
         NATIVE("native"),
 
         IF("if"), ELSE("else"),
+        FOR("for"),
 
         NULL("null"),
         TRUE("true"), FALSE("false"),
