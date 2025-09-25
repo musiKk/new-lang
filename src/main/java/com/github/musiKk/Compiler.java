@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import lombok.AllArgsConstructor;
 import lombok.RequiredArgsConstructor;
@@ -57,7 +58,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
         compileCompilationUnit(cu, output);
 
         try {
-            output.emit(Path.of(target, resolvedPath.getFileName().toString()));
+            output.emit(Path.of(target, resolvedPath.getFileName().toString().replace(".tst", ".c")));
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -107,8 +108,8 @@ public class Compiler implements ConfigReader.ConfigTarget {
                 .forEach(t -> compileType(t, output));
 
         // 2. compile functions
-        functionRegistry.map.values().stream()
-                .forEach(f -> compileFunctionDefinition(f, output));
+        functionRegistry.declaredFunctions.stream()
+                .forEach(fd -> compileFunctionDefinition(fd, output));
     }
 
     private void compileType(Registry.RegistryValue<Type> rv, Output output) {
@@ -123,26 +124,48 @@ public class Compiler implements ConfigReader.ConfigTarget {
                             struct.field(propertyName, propertyType);
                         });
                 struct.finish();
+
+                functionRegistry.register(new FunctionRegistry.Function(
+                    Optional.empty(),
+                    rv.cName() + "__new",
+                    rv.parsedStatement().getName(),
+                    dt.dataDefinition().variableDeclarations().stream()
+                            .map(vd -> new FunctionRegistry.Function.Parameter(vd.name(), vd.type().get()))
+                            .toList()
+                ), dt.getName());
+                var fb = output.function(rv.cName() + "__new", rv.cName());
+                dt.dataDefinition().variableDeclarations().stream()
+                            .forEach(vd -> fb.parameter(vd.name(), typeRegistry.lookupCName(vd.type().get())));
+                List<Output.Expression> blockExpressions = new ArrayList<>();
+                blockExpressions.add(new Output.VariableDeclaration("ret", rv.cName()));
+                blockExpressions.add(new Output.Assignment("ret", new Output.Allocation(rv.cName())));
+                dt.dataDefinition().variableDeclarations().forEach(vd -> {
+                    blockExpressions.add(new Output.FieldAssignment("ret", vd.name(), new Output.NameExpression(vd.name())));
+                });
+                blockExpressions.add(new Output.Return(new Output.NameExpression("ret")));
+                fb.body(blockExpressions);
             }
             default -> {}
         }
     }
 
-    private void compileFunctionDefinition(Registry.RegistryValue<FunctionDeclaration> rv, Output output) {
-        var signature = rv.parsedStatement().signature();
-        var function = output.function(rv.cName(), signature.returnType());
+    private void compileFunctionDefinition(FunctionDeclaration fd, Output output) {
+        if (!(fd instanceof UserFunctionDeclaration)) {
+            return;
+        }
+        UserFunctionDeclaration ufd = (UserFunctionDeclaration) fd;
+
+        var signature = ufd.signature();
+        var function = output.function(functionRegistry.lookupCName(signature.name()), signature.returnType());
         if (signature.receiver() instanceof FunctionReceiverVariable frv) {
             function.parameter("self", typeRegistry.lookupCName(frv.name()));
         }
         signature.parameters().stream()
                 .forEach(p -> function.parameter(p.name(), typeRegistry.lookupCName(p.type().get())));
-        if (rv.parsedStatement() instanceof UserFunctionDeclaration ufd) {
-            var scope = new Scope();
-            signature.parameters().stream()
-                    .forEach(p -> scope.variables.put(p.name(), typeRegistry.lookupCName(p.type().get())));
-            function.body(compileExpression(ufd.body(), scope));
-        }
-        function.finish();
+        var scope = new Scope();
+        signature.parameters().stream()
+                .forEach(p -> scope.variables.put(p.name(), typeRegistry.lookupCName(p.type().get())));
+        function.body(List.of(compileExpression(ufd.body(), scope)));
     }
 
     class Scope {
@@ -273,23 +296,19 @@ public class Compiler implements ConfigReader.ConfigTarget {
             }
         }
 
-        record Function(String cName, String returnType, List<Parameter> parameters, Expression body) {};
+        record Function(String cName, String returnType, List<Parameter> parameters, List<Expression> body) {};
         record Parameter(String name, String type) {};
 
         @RequiredArgsConstructor
         class FunctionBuilder {
             final String cName;
             final String returnType;
-            Expression body;
             final List<Parameter> parameters = new ArrayList<>();
             void parameter(String name, String type) {
                 parameters.add(new Parameter(name, type));
             }
-            void body(Expression expression) {
-                body = expression;
-            }
-            void finish() {
-                functions.add(new Function(cName, returnType, parameters, body));
+            void body(List<Expression> expressions) {
+                functions.add(new Function(cName, returnType, parameters, expressions));
             }
         }
 
@@ -315,6 +334,9 @@ public class Compiler implements ConfigReader.ConfigTarget {
         record Block(List<Expression> expressions) implements Expression {}
         record VariableDeclaration(String name, String type) implements Expression {}
         record Assignment(String name, Expression right) implements Expression {}
+        record FieldAssignment(String var, String field, Expression right) implements Expression {}
+        record Allocation(String type) implements Expression {}
+        record Return(Expression retval) implements Expression {}
     }
 
     static class OutputEmitter implements AutoCloseable {
@@ -326,16 +348,61 @@ public class Compiler implements ConfigReader.ConfigTarget {
             writer = new FileWriter(targetPath.toFile());
         }
         void emit() {
+            emitLine("#include<stdlib.h>");
+
             output.structs.stream()
                     .forEach(this::emitStruct);
             output.functions.stream()
                     .forEach(this::emitPrototype);
             output.functions.stream()
                     .forEach(this::emitFunction);
+
+            emitLine("int main() {return 0;}");
         }
 
         void emitFunction(Output.Function function) {
+            emitLine(function.returnType + " " + function.cName + "(");
+            indent();
+            for (int i = 0; i < function.parameters.size(); i++) {
+                var p = function.parameters.get(i);
+                emitLine(p.type + " " + p.name + (i < function.parameters.size() - 1 ? "," : ""));
+            }
+            outdent();
+            emitLine(") {");
+            indent();
+            for (Output.Expression e : function.body) {
+                emitExpression(e);
+            }
+            outdent();
+            emitLine("}");
+        }
 
+        void emitExpression(Output.Expression e) {
+            switch (e) {
+                case Output.NameExpression n -> emitLine(n.name);
+                case Output.VariableDeclaration vd -> {
+                    emitLine(vd.type + " " + vd.name + ";");
+                }
+                case Output.Assignment a -> {
+                    emitLine(a.name + " = ");
+                    emitExpression(a.right);
+                    emitLine(";");
+                }
+                case Output.FieldAssignment fa -> {
+                    emitLine(fa.var + " -> " + fa.field + " = ");
+                    emitExpression(fa.right);
+                    emitLine(";");
+                }
+                case Output.Allocation a -> {
+                    emitLine("malloc(sizeof(" + a.type + "))");
+                }
+                case Output.Return r -> {
+                    emitLine("return ");
+                    emitExpression(r.retval);
+                    emitLine(";");
+                }
+                default -> throw new RuntimeException("not implemented: " + e);
+            }
         }
 
         void emitPrototype(Output.Function function) {
@@ -402,6 +469,13 @@ abstract class Registry<T> {
         map.put(sourceName, new RegistryValue<>(cName, parsedStatement));
     }
 
+    void register(T parsedStatement, String sourceName) {
+        if (map.containsKey(sourceName)) {
+            throw new RuntimeException(sourceName + " already defined");
+        }
+        map.put(sourceName, new RegistryValue<>(sourceName, parsedStatement));
+    }
+
     String lookupCName(String name) {
         return map.get(name).cName;
     }
@@ -416,21 +490,26 @@ abstract class Registry<T> {
     record RegistryValue<T>(String cName, T parsedStatement) {};
 }
 
-class FunctionRegistry extends Registry<FunctionDeclaration> {
+class FunctionRegistry extends Registry<FunctionRegistry.Function> {
+
+    List<FunctionDeclaration> declaredFunctions = new ArrayList<>();
 
     @Override
-    protected String getSourceName(FunctionDeclaration fd) {
-        return fd.signature().name();
+    protected String getSourceName(FunctionRegistry.Function f) {
+        return f.name();
     }
 
     @Override
-    protected String generateCName(FunctionDeclaration fd) {
-        var sig = fd.signature();
-        String mappedName = switch (sig.receiver()) {
-            case StandaloneFunctionReceiver sfr -> "";
-            case FunctionReceiverVariable fv -> fv.name() + "__";
-        };
-        return mappedName + sig.name();
+    protected String generateCName(FunctionRegistry.Function f) {
+        return f.target.map(n -> n + "__").orElse("") + f.name;
+    }
+
+    static record Function(
+            Optional<String> target,
+            String name,
+            String type,
+            List<Parameter> parameters) {
+        record Parameter(String name, String type) {}
     }
 
 }
@@ -441,13 +520,31 @@ class FunctionCollector {
     CompilationUnit cu;
     void run() {
         // TODO only top-level functions recognized for now
+        List<FunctionDeclaration> functionDeclarations = new ArrayList<>();
         for (var stmt : cu.statements()) {
             switch (stmt) {
-                case FunctionDeclaration fd ->
-                        functionRegistry.register(fd);
+                case FunctionDeclaration fd -> {
+                    functionRegistry.register(toFunction(fd));
+                    functionDeclarations.add(fd);
+                }
                 default -> {}
             }
         }
+        functionRegistry.declaredFunctions.addAll(functionDeclarations);
+    }
+    static FunctionRegistry.Function toFunction(FunctionDeclaration fd) {
+        var sig = fd.signature();
+        Optional<String> target = Optional.empty();
+        if (fd.signature().receiver() instanceof FunctionReceiverVariable frv) {
+            target = Optional.of(frv.name());
+        }
+        return new FunctionRegistry.Function(
+                target,
+                sig.name(),
+                sig.returnType(),
+                sig.parameters().stream()
+                        .map(p -> new FunctionRegistry.Function.Parameter(p.name(), p.type().get()))
+                        .toList());
     }
 }
 
