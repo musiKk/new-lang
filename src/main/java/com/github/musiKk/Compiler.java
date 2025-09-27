@@ -299,7 +299,8 @@ public class Compiler implements ConfigReader.ConfigTarget {
             writer = new FileWriter(targetPath.toFile());
         }
         void emit() {
-            emitLine("#include<stdlib.h>");
+            emitLineNl("#include<stdlib.h>", true);
+            emitLineNl("", true);
 
             output.structs.stream()
                     .forEach(this::emitStruct);
@@ -308,76 +309,74 @@ public class Compiler implements ConfigReader.ConfigTarget {
             output.functions.stream()
                     .forEach(this::emitFunction);
 
-            emitLine("int main() {return 0;}");
+            emitLineNl("int main() {return 0;}", true);
         }
 
         void emitFunction(Output.Function function) {
-            emitLine(function.returnType + " " + function.cName + "(");
+            emitLineNl(function.returnType + " " + function.cName + "(", true);
             indent();
             for (int i = 0; i < function.parameters.size(); i++) {
                 var p = function.parameters.get(i);
-                emitLine(p.type + " " + p.name + (i < function.parameters.size() - 1 ? "," : ""));
+                emitLineNl(p.type + " " + p.name + (i < function.parameters.size() - 1 ? "," : ""), true);
             }
             outdent();
-            emitLine(") {");
+            emitLineNl(") {", true);
             indent();
             for (Output.Expression e : function.body) {
-                emitExpression(e);
+                emitExpression(e, true);
             }
             outdent();
-            emitLine("}");
+            emitLineNl("}", true);
         }
 
-        void emitExpression(Output.Expression e) {
+        void emitExpression(Output.Expression e, boolean doIndent) {
             switch (e) {
-                case Output.NameExpression n -> emitLine(n.name);
+                case Output.NameExpression n -> emitLine(n.name, doIndent);
                 case Output.VariableDeclaration vd -> {
-                    emitLine(vd.type + " " + vd.name + ";");
+                    emitLineNl(vd.type + " " + vd.name + ";", true);
                 }
                 case Output.Assignment a -> {
-                    emitLine(a.name + " = ");
-                    emitExpression(a.right);
-                    emitLine(";");
+                    emitLine(a.name + " = ", true);
+                    emitExpression(a.right, false);
+                    emitLineNl(";", false);
                 }
                 case Output.FieldAssignment fa -> {
-                    emitLine(fa.var + " -> " + fa.field + " = ");
-                    emitExpression(fa.right);
-                    emitLine(";");
+                    emitLine(fa.var + " -> " + fa.field + " = ", true);
+                    emitExpression(fa.right, false);
+                    emitLineNl(";", false);
                 }
                 case Output.Allocation a -> {
-                    emitLine("malloc(sizeof(" + a.type + "))");
+                    emitLine("malloc(sizeof(" + a.type + "))", false);
                 }
                 case Output.Return r -> {
-                    emitLine("return ");
-                    emitExpression(r.retval);
-                    emitLine(";");
+                    emitLine("return ", true);
+                    emitExpression(r.retval, false);
+                    emitLineNl(";", false);
                 }
                 default -> throw new RuntimeException("not implemented: " + e);
             }
         }
 
         void emitPrototype(Output.Function function) {
-            emitLine(function.returnType + " " + function.cName + "(");
+            emitLineNl(function.returnType + " " + function.cName + "(", true);
             indent();
             for (int i = 0; i < function.parameters.size(); i++) {
                 var p = function.parameters.get(i);
-                emitLine(p.type + " " + p.name + (i < function.parameters.size() - 1 ? "," : ""));
+                emitLineNl(p.type + " " + p.name + (i < function.parameters.size() - 1 ? "," : ""), true);
             }
             outdent();
-            emitLine(");");
-            emitLine("");
+            emitLineNl(");", true);
         }
 
         void emitStruct(Output.Struct struct) {
             var structName = struct.cName + "__struct";
-            emitLine("struct " + structName + " {");
+            emitLineNl("struct " + structName + " {", true);
             indent();
             struct.fields.stream()
-                    .forEach(f -> emitLine(f.type + " " + f.name + ";"));
+                    .forEach(f -> emitLineNl(f.type + " " + f.name + ";", true));
             outdent();
-            emitLine("};");
-            emitLine("typedef struct " + structName + "* " + struct.cName + ";");
-            emitLine("");
+            emitLineNl("};", true);
+            emitLineNl("typedef struct " + structName + "* " + struct.cName + ";", true);
         }
 
         void indent() {
@@ -388,13 +387,21 @@ public class Compiler implements ConfigReader.ConfigTarget {
             indent--;
         }
 
-        void emitLine(String line) {
+        void emitLineNl(String line, boolean doIndent) {
+            emitLine(line, doIndent);
+            emit("\n");
+        }
+
+        void emitLine(String line, boolean doIndent) {
+            for (int i = 0; i < indent && doIndent; i++) {
+                emit("  ");
+            }
+                emit(line);
+        }
+
+        void emit(String text) {
             try {
-                for (int i = 0; i < indent; i++) {
-                    writer.append("    ");
-                }
-                writer.append(line);
-                writer.append('\n');
+                writer.append(text);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
