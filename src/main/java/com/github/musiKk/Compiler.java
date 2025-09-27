@@ -113,40 +113,39 @@ public class Compiler implements ConfigReader.ConfigTarget {
     }
 
     private void compileType(Registry.RegistryValue<Type> rv, Output output) {
-        switch (rv.parsedStatement()) {
-            case Type.DataType dt -> {
-                var struct = output.struct(rv.cName());
-                dt.dataDefinition().variableDeclarations().stream()
-                        .forEach(vd -> {
-                            String propertyType = typeRegistry.lookupCName(vd.type().get());
-                            String propertyName = vd.name();
+        if (!(rv.parsedStatement() instanceof Type.DataType)) return;
 
-                            struct.field(propertyName, propertyType);
-                        });
-                struct.finish();
+        var dt = (Type.DataType) rv.parsedStatement();
 
-                functionRegistry.register(new FunctionRegistry.Function(
-                    Optional.empty(),
-                    rv.cName() + "__new",
-                    rv.parsedStatement().getName(),
-                    dt.dataDefinition().variableDeclarations().stream()
-                            .map(vd -> new FunctionRegistry.Function.Parameter(vd.name(), vd.type().get()))
-                            .toList()
-                ), dt.getName());
-                var fb = output.function(rv.cName() + "__new", rv.cName());
-                dt.dataDefinition().variableDeclarations().stream()
-                            .forEach(vd -> fb.parameter(vd.name(), typeRegistry.lookupCName(vd.type().get())));
-                List<Output.Expression> blockExpressions = new ArrayList<>();
-                blockExpressions.add(new Output.VariableDeclaration("ret", rv.cName()));
-                blockExpressions.add(new Output.Assignment("ret", new Output.Allocation(rv.cName())));
-                dt.dataDefinition().variableDeclarations().forEach(vd -> {
-                    blockExpressions.add(new Output.FieldAssignment("ret", vd.name(), new Output.NameExpression(vd.name())));
+        var struct = output.struct(rv.cName());
+        dt.dataDefinition().variableDeclarations().stream()
+                .forEach(vd -> {
+                    String propertyType = typeRegistry.lookupCName(vd.type().get());
+                    String propertyName = vd.name();
+
+                    struct.field(propertyName, propertyType);
                 });
-                blockExpressions.add(new Output.Return(new Output.NameExpression("ret")));
-                fb.body(blockExpressions);
-            }
-            default -> {}
-        }
+        struct.finish();
+
+        functionRegistry.register(new FunctionRegistry.Function(
+            Optional.empty(),
+            rv.cName() + "__new",
+            rv.parsedStatement().getName(),
+            dt.dataDefinition().variableDeclarations().stream()
+                    .map(vd -> new FunctionRegistry.Function.Parameter(vd.name(), vd.type().get()))
+                    .toList()
+        ), dt.getName());
+        var fb = output.function(rv.cName() + "__new", rv.cName());
+        dt.dataDefinition().variableDeclarations().stream()
+                    .forEach(vd -> fb.parameter(vd.name(), typeRegistry.lookupCName(vd.type().get())));
+        List<Output.Expression> blockExpressions = new ArrayList<>();
+        blockExpressions.add(new Output.VariableDeclaration("ret", rv.cName()));
+        blockExpressions.add(new Output.Assignment("ret", new Output.Allocation(rv.cName())));
+        dt.dataDefinition().variableDeclarations().forEach(vd -> {
+            blockExpressions.add(new Output.FieldAssignment("ret", vd.name(), new Output.NameExpression(vd.name())));
+        });
+        blockExpressions.add(new Output.Return(new Output.NameExpression("ret")));
+        fb.body(blockExpressions);
     }
 
     private void compileFunctionDefinition(FunctionDeclaration fd, Output output) {
@@ -228,54 +227,6 @@ public class Compiler implements ConfigReader.ConfigTarget {
             default -> throw new RuntimeException(parsedExpression.toString());
         };
     }
-
-    // private void compileExpression(Expression e, Output output) {
-    //     switch (e) {
-    //         case BlockExpression be -> {
-    //             for (var statement : be.statements()) {
-    //                 compileStatement(statement, output);
-    //             }
-    //         }
-    //         case NumberExpression ne -> output.write(Long.toString(ne.number()));
-    //         case StringExpression se -> output.write("\"", se.string(), "\"");
-    //         case VariableExpression ve when ve.target().isEmpty() ->
-    //             output.write(ve.name());
-    //         case BinaryExpression be -> {
-    //             output.write("(");
-    //             compileExpression(be.left(), output);
-    //             switch (be.operator()) {
-    //                 case PLUS -> output.write(" + ");
-    //                 case MINUS -> output.write(" - ");
-    //                 case STAR -> output.write(" * ");
-    //                 case SLASH -> output.write(" / ");
-    //                 default -> throw new RuntimeException("unsupported operator " + be.operator());
-    //             }
-    //             compileExpression(be.right(), output);
-    //             output.write(")");
-    //         }
-    //         case AssignmentExpression ae -> {
-    //             compileExpression(ae.target(), output);
-    //             compileExpression(ae.value(), output);
-    //             output.writeln(";");
-    //         }
-    //         default -> throw new RuntimeException("unsupported expression " + e);
-    //     }
-    // }
-
-    // private void compileStatement(Statement s, Output output) {
-    //     switch (s) {
-    //         case ExpressionStatement es -> compileExpression(es.expression(), output);
-    //         case VariableDeclaration vd -> {
-    //             output.write(vd.type().get(), " ", vd.name());
-    //             if (vd.initializer().isPresent()) {
-    //                 output.write(" = ");
-    //                 compileExpression(vd.initializer().get(), output);
-    //             }
-    //             output.writeln(";");
-    //         }
-    //         default -> throw new RuntimeException("unsupported statement " + s);
-    //     }
-    // }
 
     @ToString
     static class Output {
@@ -469,6 +420,7 @@ abstract class Registry<T> {
         map.put(sourceName, new RegistryValue<>(cName, parsedStatement));
     }
 
+    // TODO this is a hack for synthetic function names not matching the source name
     void register(T parsedStatement, String sourceName) {
         if (map.containsKey(sourceName)) {
             throw new RuntimeException(sourceName + " already defined");
