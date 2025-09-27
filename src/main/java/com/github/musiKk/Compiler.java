@@ -127,14 +127,14 @@ public class Compiler implements ConfigReader.ConfigTarget {
                 });
         struct.finish();
 
-        functionRegistry.register(new FunctionRegistry.Function(
+        functionRegistry.register(dt.getName(), new FunctionRegistry.Function(
             Optional.empty(),
             rv.cName() + "__new",
             rv.parsedStatement().getName(),
             dt.dataDefinition().variableDeclarations().stream()
                     .map(vd -> new FunctionRegistry.Function.Parameter(vd.name(), vd.type().get()))
                     .toList()
-        ), dt.getName());
+        ));
         var fb = output.function(rv.cName() + "__new", rv.cName());
         dt.dataDefinition().variableDeclarations().stream()
                     .forEach(vd -> fb.parameter(vd.name(), typeRegistry.lookupCName(vd.type().get())));
@@ -413,19 +413,14 @@ abstract class Registry<T> {
 
     void register(T parsedStatement) {
         var sourceName = getSourceName(parsedStatement);
-        if (map.containsKey(sourceName)) {
-            throw new RuntimeException(sourceName + " already defined");
-        }
-        var cName = generateCName(parsedStatement);
-        map.put(sourceName, new RegistryValue<>(cName, parsedStatement));
+        register(sourceName, parsedStatement);
     }
 
-    // TODO this is a hack for synthetic function names not matching the source name
-    void register(T parsedStatement, String sourceName) {
+    void register(String sourceName, T parsedStatement) {
         if (map.containsKey(sourceName)) {
             throw new RuntimeException(sourceName + " already defined");
         }
-        map.put(sourceName, new RegistryValue<>(sourceName, parsedStatement));
+        map.put(sourceName, new RegistryValue<>(generateCName(parsedStatement), parsedStatement));
     }
 
     String lookupCName(String name) {
