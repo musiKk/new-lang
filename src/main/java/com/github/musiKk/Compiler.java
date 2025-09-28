@@ -75,6 +75,12 @@ public class Compiler implements ConfigReader.ConfigTarget {
                         "print",
                         "void",
                         List.of(new FunctionRegistry.Function.Parameter("s", typeRegistry.lookupCName("String")))));
+        functionRegistry.register("toString",
+                new FunctionRegistry.Function(
+                        Optional.of("Int"),
+                        "toString",
+                        "String",
+                        List.of()));
     }
 
     private void collectFunctions(CompilationUnit cu) {
@@ -366,7 +372,8 @@ public class Compiler implements ConfigReader.ConfigTarget {
         }
         void emit() {
             emitLineNl("#include \"rt.h\"", true);
-            emitLineNl("#include \"rt_string.h\"", true);
+            emitLineNl("#include \"rt_io.h\"", true);
+            emitLineNl("#include \"rt_primitives.h\"", true);
 
             emitLineNl("", true);
 
