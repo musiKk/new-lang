@@ -117,6 +117,18 @@ public class Compiler implements ConfigReader.ConfigTarget {
         // 2. compile functions
         functionRegistry.declaredFunctions.stream()
                 .forEach(fd -> compileFunctionDefinition(fd, output));
+
+        compileMain(cu, output);
+    }
+
+    private void compileMain(CompilationUnit cu, Output output) {
+        var fb = output.function("main", "int");
+        cu.statements().stream()
+                .filter(s -> !(s instanceof DataDefinition))
+                .filter(s -> !(s instanceof FunctionDeclaration))
+                .forEach(s -> compileStatement(s, new Compiler.Scope(), fb));
+        fb.addExpression(new Output.Return(new Output.NumberExpression(0)));
+        fb.finish();
     }
 
     private void compileType(Registry.RegistryValue<Type> rv, Output output) {
@@ -360,8 +372,6 @@ public class Compiler implements ConfigReader.ConfigTarget {
                     .forEach(this::emitPrototype);
             output.functions.stream()
                     .forEach(this::emitFunction);
-
-            emitLineNl("int main() {return 0;}", true);
         }
 
         void emitFunction(Output.Function function) {
