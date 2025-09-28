@@ -68,6 +68,14 @@ public class Compiler implements ConfigReader.ConfigTarget {
 
     private void registerBasicTypes() {
         typeRegistry.register(new Type.IntType());
+        typeRegistry.register(new Type.StringType());
+
+        functionRegistry.register("print",
+                new FunctionRegistry.Function(
+                        Optional.empty(),
+                        "print",
+                        "void",
+                        List.of(new FunctionRegistry.Function.Parameter("s", typeRegistry.lookupCName("String")))));
     }
 
     private void collectFunctions(CompilationUnit cu) {
@@ -192,6 +200,14 @@ public class Compiler implements ConfigReader.ConfigTarget {
     private Output.Expression compileExpression(Expression parsedExpression, Scope locals, Output.FunctionBuilder fb) {
         return switch (parsedExpression) {
             case NumberExpression(long n) -> new Output.NumberExpression(n);
+            case StringExpression(String s) -> {
+                var stringCType = typeRegistry.lookupCName("String");
+                var stringVarName = locals.newTemp(stringCType);
+                fb.addExpression(new Output.VariableDeclaration(stringVarName, stringCType));
+                fb.addExpression(new Output.Assignment(stringVarName, new Output.FunctionEvaluation("String__native_new_copy", List.of(new Output.StringLiteral(s)))));
+
+                yield new Output.NameExpression(stringVarName);
+            }
             case VariableExpression(var target, String name) when target.isEmpty() -> {
                 if (!locals.variables.containsKey(name)) {
                     throw new RuntimeException("name " + name + " not found");
@@ -298,6 +314,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
 
         static interface Expression {}
         record NumberExpression(long l) implements Expression {}
+        record StringLiteral(String s) implements Expression {}
         record NameExpression(String name) implements Expression {}
         record BinaryExpression(Expression left, String op, Expression right) implements Expression {}
         record Block(List<Expression> expressions) implements Expression {}
@@ -319,7 +336,9 @@ public class Compiler implements ConfigReader.ConfigTarget {
             writer = new FileWriter(targetPath.toFile());
         }
         void emit() {
-            emitLineNl("#include<stdlib.h>", true);
+            emitLineNl("#include \"rt.h\"", true);
+            emitLineNl("#include \"rt_string.h\"", true);
+
             emitLineNl("", true);
 
             output.structs.stream()
@@ -351,6 +370,8 @@ public class Compiler implements ConfigReader.ConfigTarget {
 
         void emitExpression(Output.Expression e, boolean doIndent) {
             switch (e) {
+                case Output.NumberExpression n -> emitLine(Long.toString(n.l), doIndent);
+                case Output.StringLiteral s -> emitLine("\""  + s.s + "\"", doIndent);
                 case Output.NameExpression n -> emitLine(n.name, doIndent);
                 case Output.VariableDeclaration vd -> {
                     emitLineNl(vd.type + " " + vd.name + ";", true);
@@ -371,7 +392,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
                     emitLine(" -> " + fa.field, false);
                 }
                 case Output.Allocation a -> {
-                    emitLine(String.format("(%1$s) malloc(sizeof(*(%1$s)0))", a.type), false);
+                    emitLine(String.format("NEW(%s)", a.type), false);
                 }
                 case Output.Return r -> {
                     emitLine("return ", true);
@@ -471,7 +492,6 @@ abstract class Registry<T> {
     }
 
     String lookupCName(String name) {
-        System.err.println("looking up " + name);
         return map.get(name).cName;
     }
 
@@ -577,6 +597,18 @@ class TypeRegistry extends Registry<Type> {
 interface Type {
     String getName();
     String getCRepresentation();
+    record StringType() implements Type {
+        @Override
+        public String getName() {
+            return "String";
+        }
+
+        @Override
+        public String getCRepresentation() {
+            return "String";
+        }
+
+    }
     record IntType() implements Type {
         @Override
         public String getName() {
