@@ -272,9 +272,13 @@ public class Compiler implements ConfigReader.ConfigTarget {
                 yield new Output.NameExpression(tmpName);
             }
             case FunctionEvaluationExpression fee -> {
-                var args = fee.arguments().stream()
+                List<Output.Expression> args = new ArrayList<>();
+                fee.target()
                         .map(e -> compileExpression(e, locals, fb))
-                        .toList();
+                        .ifPresent(args::add);
+                fee.arguments().stream()
+                        .map(e -> compileExpression(e, locals, fb))
+                        .forEach(args::add);
                 var fName = functionRegistry.lookupCName(fee.name());
 
                 yield new Output.FunctionEvaluation(fName, args);
