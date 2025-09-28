@@ -53,7 +53,6 @@ public class Compiler implements ConfigReader.ConfigTarget {
         // 3. phase: collect all functions
         collectFunctions(cu);
 
-        // var output = new Output(Path.of(target, pathString.replace(".tst", ".c")));
         var output = new Output();
         compileCompilationUnit(cu, output);
 
@@ -197,6 +196,19 @@ public class Compiler implements ConfigReader.ConfigTarget {
         }
     }
 
+    private void compileStatement(Statement statement, Scope locals, Output.FunctionBuilder fb) {
+        switch (statement) {
+            case ExpressionStatement es -> fb.addExpression(compileExpression(es.expression(), locals, fb));
+            case VariableDeclaration vd -> {
+                Optional<Output.Expression> initStatement = vd.initializer().map(e -> compileExpression(e, locals, fb));
+                locals.variables.put(vd.name(), typeRegistry.lookupCName(vd.type().get()));
+                fb.addExpression(new Output.VariableDeclaration(vd.name(), typeRegistry.lookupCName(vd.type().get())));
+                initStatement.ifPresent(is -> fb.addExpression(new Output.Assignment(vd.name(), is)));
+            }
+            default -> throw new RuntimeException(statement.toString());
+        }
+    }
+
     private Output.Expression compileExpression(Expression parsedExpression, Scope locals, Output.FunctionBuilder fb) {
         return switch (parsedExpression) {
             case NumberExpression(long n) -> new Output.NumberExpression(n);
@@ -227,7 +239,8 @@ public class Compiler implements ConfigReader.ConfigTarget {
                 var stmts = be.statements();
                 var returnStatement = ((ExpressionStatement) stmts.getLast()).expression();
                 for (int i = 0; i <= stmts.size() - 1; i++) {
-                    fb.addExpression(compileExpression(parsedExpression, locals, fb));
+                    var stmt = stmts.get(i);
+                    compileStatement(stmt, locals, fb);
                 }
 
                 var compiledReturn = compileExpression(returnStatement, locals, fb);
