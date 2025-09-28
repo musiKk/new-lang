@@ -138,14 +138,13 @@ public class Compiler implements ConfigReader.ConfigTarget {
         var fb = output.function(rv.cName() + "__new", rv.cName());
         dt.dataDefinition().variableDeclarations().stream()
                     .forEach(vd -> fb.parameter(vd.name(), typeRegistry.lookupCName(vd.type().get())));
-        List<Output.Expression> blockExpressions = new ArrayList<>();
-        blockExpressions.add(new Output.VariableDeclaration("ret", rv.cName()));
-        blockExpressions.add(new Output.Assignment("ret", new Output.Allocation(rv.cName())));
+        fb.addExpression(new Output.VariableDeclaration("ret", rv.cName()));
+        fb.addExpression(new Output.Assignment("ret", new Output.Allocation(rv.cName())));
         dt.dataDefinition().variableDeclarations().forEach(vd -> {
-            blockExpressions.add(new Output.FieldAssignment("ret", vd.name(), new Output.NameExpression(vd.name())));
+            fb.addExpression(new Output.FieldAssignment("ret", vd.name(), new Output.NameExpression(vd.name())));
         });
-        blockExpressions.add(new Output.Return(new Output.NameExpression("ret")));
-        fb.body(blockExpressions);
+        fb.addExpression(new Output.Return(new Output.NameExpression("ret")));
+        fb.finish();
     }
 
     private void compileFunctionDefinition(FunctionDeclaration fd, Output output) {
@@ -162,9 +161,15 @@ public class Compiler implements ConfigReader.ConfigTarget {
         signature.parameters().stream()
                 .forEach(p -> function.parameter(p.name(), typeRegistry.lookupCName(p.type().get())));
         var scope = new Scope();
+        if (signature.receiver() instanceof FunctionReceiverVariable frv) {
+            scope.variables.put("self", typeRegistry.lookupCName(frv.name()));
+        }
         signature.parameters().stream()
                 .forEach(p -> scope.variables.put(p.name(), typeRegistry.lookupCName(p.type().get())));
-        function.body(List.of(compileExpression(ufd.body(), scope)));
+
+        var result = compileExpression(ufd.body(), scope, function);
+        function.addExpression(new Output.Return(result));
+        function.finish();
     }
 
     class Scope {
@@ -184,7 +189,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
         }
     }
 
-    private Output.Expression compileExpression(Expression parsedExpression, Scope locals) {
+    private Output.Expression compileExpression(Expression parsedExpression, Scope locals, Output.FunctionBuilder fb) {
         return switch (parsedExpression) {
             case NumberExpression(long n) -> new Output.NumberExpression(n);
             case VariableExpression(var target, String name) when target.isEmpty() -> {
@@ -194,19 +199,18 @@ public class Compiler implements ConfigReader.ConfigTarget {
                         yield new Output.NameExpression(name);
                     }
             case BinaryExpression be -> {
-                var left = compileExpression(be.left(), locals);
-                var right = compileExpression(be.right(), locals);
+                var left = compileExpression(be.left(), locals, fb);
+                var right = compileExpression(be.right(), locals, fb);
                 yield new Output.BinaryExpression(left, be.operator().constantPattern, right);
             }
             case BlockExpression be -> {
                 var stmts = be.statements();
                 var returnStatement = ((ExpressionStatement) stmts.getLast()).expression();
-                List<Output.Expression> compiledStatements = new ArrayList<>();
                 for (int i = 0; i <= stmts.size() - 1; i++) {
-                    compiledStatements.add(compileExpression(parsedExpression, locals));
+                    fb.addExpression(compileExpression(parsedExpression, locals, fb));
                 }
 
-                var compiledReturn = compileExpression(returnStatement, locals);
+                var compiledReturn = compileExpression(returnStatement, locals, fb);
                 String tmpType = switch (compiledReturn) {
                     case Output.NumberExpression(long n) -> "Int";
                     case Output.NameExpression(String n) -> locals.variables.get(n);
@@ -217,11 +221,11 @@ public class Compiler implements ConfigReader.ConfigTarget {
                 var resultVarDecl = new Output.VariableDeclaration(tmpName, tmpType);
                 var resultVarAssign = new Output.Assignment(tmpName, compiledReturn);
 
-                List<Output.Expression> finalStatements = new ArrayList<>();
-                finalStatements.add(resultVarDecl);
-                finalStatements.addAll(compiledStatements);
-                finalStatements.add(resultVarAssign);
+                fb.addExpression(resultVarDecl);
+                fb.addExpression(resultVarAssign);
 
+                yield new Output.NameExpression(tmpName);
+            }
                 yield new Output.Block(finalStatements);
             }
             default -> throw new RuntimeException(parsedExpression.toString());
@@ -247,7 +251,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
             }
         }
 
-        record Function(String cName, String returnType, List<Parameter> parameters, List<Expression> body) {};
+        record Function(String cName, String returnType, List<Parameter> parameters, List<Output.Expression> body) {};
         record Parameter(String name, String type) {};
 
         @RequiredArgsConstructor
@@ -255,11 +259,15 @@ public class Compiler implements ConfigReader.ConfigTarget {
             final String cName;
             final String returnType;
             final List<Parameter> parameters = new ArrayList<>();
+            final List<Expression> body = new ArrayList<>();
             void parameter(String name, String type) {
                 parameters.add(new Parameter(name, type));
             }
-            void body(List<Expression> expressions) {
-                functions.add(new Function(cName, returnType, parameters, expressions));
+            void addExpression(Output.Expression e) {
+                body.add(e);
+            }
+            void finish() {
+                functions.add(new Function(cName, returnType, parameters, body));
             }
         }
 
@@ -352,6 +360,11 @@ public class Compiler implements ConfigReader.ConfigTarget {
                     emitLine("return ", true);
                     emitExpression(r.retval, false);
                     emitLineNl(";", false);
+                }
+                case Output.BinaryExpression be -> {
+                    emitExpression(be.left, doIndent);
+                    emit(be.op);
+                    emitExpression(be.right, false);
                 }
                 default -> throw new RuntimeException("not implemented: " + e);
             }
