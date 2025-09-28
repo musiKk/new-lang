@@ -155,7 +155,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
         UserFunctionDeclaration ufd = (UserFunctionDeclaration) fd;
 
         var signature = ufd.signature();
-        var function = output.function(functionRegistry.lookupCName(signature.name()), signature.returnType());
+        var function = output.function(functionRegistry.lookupCName(signature.name()), typeRegistry.lookupCName(signature.returnType()));
         if (signature.receiver() instanceof FunctionReceiverVariable frv) {
             function.parameter("self", typeRegistry.lookupCName(frv.name()));
         }
