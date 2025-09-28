@@ -141,7 +141,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
         fb.addExpression(new Output.VariableDeclaration("ret", rv.cName()));
         fb.addExpression(new Output.Assignment("ret", new Output.Allocation(rv.cName())));
         dt.dataDefinition().variableDeclarations().forEach(vd -> {
-            fb.addExpression(new Output.FieldAssignment("ret", vd.name(), new Output.NameExpression(vd.name())));
+            fb.addExpression(new Output.FieldAssignment(new Output.NameExpression("ret"), vd.name(), new Output.NameExpression(vd.name())));
         });
         fb.addExpression(new Output.Return(new Output.NameExpression("ret")));
         fb.finish();
@@ -193,11 +193,15 @@ public class Compiler implements ConfigReader.ConfigTarget {
         return switch (parsedExpression) {
             case NumberExpression(long n) -> new Output.NumberExpression(n);
             case VariableExpression(var target, String name) when target.isEmpty() -> {
-                        if (!locals.variables.containsKey(name)) {
-                            throw new RuntimeException("name " + name + " not found");
-                        }
-                        yield new Output.NameExpression(name);
-                    }
+                if (!locals.variables.containsKey(name)) {
+                    throw new RuntimeException("name " + name + " not found");
+                }
+                yield new Output.NameExpression(name);
+            }
+            case VariableExpression(var target, String name) when target.isPresent() -> {
+                var compiledTarget = compileExpression(target.get(), locals, fb);
+                yield new Output.FieldAccess(compiledTarget, name);
+            }
             case BinaryExpression be -> {
                 var left = compileExpression(be.left(), locals, fb);
                 var right = compileExpression(be.right(), locals, fb);
@@ -226,7 +230,13 @@ public class Compiler implements ConfigReader.ConfigTarget {
 
                 yield new Output.NameExpression(tmpName);
             }
-                yield new Output.Block(finalStatements);
+            case FunctionEvaluationExpression fee -> {
+                var args = fee.arguments().stream()
+                        .map(e -> compileExpression(e, locals, fb))
+                        .toList();
+                var fName = functionRegistry.lookupCName(fee.name());
+
+                yield new Output.FunctionEvaluation(fName, args);
             }
             default -> throw new RuntimeException(parsedExpression.toString());
         };
@@ -293,9 +303,11 @@ public class Compiler implements ConfigReader.ConfigTarget {
         record Block(List<Expression> expressions) implements Expression {}
         record VariableDeclaration(String name, String type) implements Expression {}
         record Assignment(String name, Expression right) implements Expression {}
-        record FieldAssignment(String var, String field, Expression right) implements Expression {}
+        record FieldAssignment(Expression target, String field, Expression right) implements Expression {}
+        record FieldAccess(Expression target, String field) implements Expression {}
         record Allocation(String type) implements Expression {}
         record Return(Expression retval) implements Expression {}
+        record FunctionEvaluation(String name, List<Expression> arguments) implements Expression {}
     }
 
     static class OutputEmitter implements AutoCloseable {
@@ -349,9 +361,14 @@ public class Compiler implements ConfigReader.ConfigTarget {
                     emitLineNl(";", false);
                 }
                 case Output.FieldAssignment fa -> {
-                    emitLine(fa.var + " -> " + fa.field + " = ", true);
+                    emitExpression(fa.target, true);
+                    emitLine(" -> " + fa.field + " = ", false);
                     emitExpression(fa.right, false);
                     emitLineNl(";", false);
+                }
+                case Output.FieldAccess fa -> {
+                    emitExpression(fa.target, false);
+                    emitLine(" -> " + fa.field, false);
                 }
                 case Output.Allocation a -> {
                     emitLine("malloc(sizeof(" + a.type + "))", false);
@@ -363,8 +380,18 @@ public class Compiler implements ConfigReader.ConfigTarget {
                 }
                 case Output.BinaryExpression be -> {
                     emitExpression(be.left, doIndent);
-                    emit(be.op);
+                    emit(" " + be.op + " ");
                     emitExpression(be.right, false);
+                }
+                case Output.FunctionEvaluation fe -> {
+                    emitLine(fe.name + "(", doIndent);
+                    int argc = fe.arguments.size();
+                    for (int i = 0; i < argc - 1; i++) {
+                        emitExpression(fe.arguments.get(i), false);
+                        emit(", ");
+                    }
+                    emitExpression(fe.arguments.getLast(), false);
+                    emit(")");
                 }
                 default -> throw new RuntimeException("not implemented: " + e);
             }
@@ -444,6 +471,7 @@ abstract class Registry<T> {
     }
 
     String lookupCName(String name) {
+        System.err.println("looking up " + name);
         return map.get(name).cName;
     }
 
