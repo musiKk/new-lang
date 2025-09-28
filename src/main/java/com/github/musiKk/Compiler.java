@@ -424,7 +424,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
                         emitExpression(fe.arguments.get(i), false);
                         emit(", ");
                     }
-                    emitExpression(fe.arguments.getLast(), false);
+                    if (argc > 0) emitExpression(fe.arguments.getLast(), false);
                     emit(")");
                 }
                 default -> throw new RuntimeException("not implemented: " + e);
