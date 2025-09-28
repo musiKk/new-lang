@@ -371,7 +371,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
                     emitLine(" -> " + fa.field, false);
                 }
                 case Output.Allocation a -> {
-                    emitLine("malloc(sizeof(" + a.type + "))", false);
+                    emitLine(String.format("(%1$s) malloc(sizeof(*(%1$s)0))", a.type), false);
                 }
                 case Output.Return r -> {
                     emitLine("return ", true);
