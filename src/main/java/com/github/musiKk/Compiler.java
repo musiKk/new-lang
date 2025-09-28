@@ -376,6 +376,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
             indent();
             for (Output.Expression e : function.body) {
                 emitExpression(e, true);
+                emitLineNl(";", false);
             }
             outdent();
             emitLineNl("}", true);
@@ -387,30 +388,27 @@ public class Compiler implements ConfigReader.ConfigTarget {
                 case Output.StringLiteral s -> emitLine("\""  + s.s + "\"", doIndent);
                 case Output.NameExpression n -> emitLine(n.name, doIndent);
                 case Output.VariableDeclaration vd -> {
-                    emitLineNl(vd.type + " " + vd.name + ";", true);
+                    emitLine(vd.type + " " + vd.name, true);
                 }
                 case Output.Assignment a -> {
                     emitLine(a.name + " = ", true);
                     emitExpression(a.right, false);
-                    emitLineNl(";", false);
                 }
                 case Output.FieldAssignment fa -> {
                     emitExpression(fa.target, true);
                     emitLine(" -> " + fa.field + " = ", false);
                     emitExpression(fa.right, false);
-                    emitLineNl(";", false);
                 }
                 case Output.FieldAccess fa -> {
                     emitExpression(fa.target, false);
                     emitLine(" -> " + fa.field, false);
                 }
                 case Output.Allocation a -> {
-                    emitLine(String.format("NEW(%s)", a.type), false);
+                    emitLine(String.format("NEW(%s)", a.type), doIndent);
                 }
                 case Output.Return r -> {
                     emitLine("return ", true);
                     emitExpression(r.retval, false);
-                    emitLineNl(";", false);
                 }
                 case Output.BinaryExpression be -> {
                     emitExpression(be.left, doIndent);
