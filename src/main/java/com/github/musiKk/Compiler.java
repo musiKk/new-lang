@@ -180,15 +180,13 @@ public class Compiler implements ConfigReader.ConfigTarget {
 
         var signature = ufd.signature();
         var function = output.function(functionRegistry.lookupCName(signature.name()), typeRegistry.lookupCName(signature.returnType()));
-        if (signature.receiver() instanceof FunctionReceiverVariable frv) {
-            function.parameter("self", typeRegistry.lookupCName(frv.name()));
-        }
+        var scope = new Scope();
+        signature.receiver().map(typeRegistry::lookupCName).ifPresent(receiverType -> {
+            function.parameter("self", receiverType);
+            scope.variables.put("self", receiverType);
+        });
         signature.parameters().stream()
                 .forEach(p -> function.parameter(p.name(), typeRegistry.lookupCName(p.type().get())));
-        var scope = new Scope();
-        if (signature.receiver() instanceof FunctionReceiverVariable frv) {
-            scope.variables.put("self", typeRegistry.lookupCName(frv.name()));
-        }
         signature.parameters().stream()
                 .forEach(p -> scope.variables.put(p.name(), typeRegistry.lookupCName(p.type().get())));
 
@@ -581,12 +579,8 @@ class FunctionCollector {
     }
     static FunctionRegistry.Function toFunction(FunctionDeclaration fd) {
         var sig = fd.signature();
-        Optional<String> target = Optional.empty();
-        if (fd.signature().receiver() instanceof FunctionReceiverVariable frv) {
-            target = Optional.of(frv.name());
-        }
         return new FunctionRegistry.Function(
-                target,
+                sig.receiver(),
                 sig.name(),
                 sig.returnType(),
                 sig.parameters().stream()

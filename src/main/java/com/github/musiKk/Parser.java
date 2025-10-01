@@ -110,13 +110,13 @@ public class Parser {
         tokens.next(TokenType.DEF);
         var nameToken = tokens.next(TokenType.IDENTIFIER);
 
-        FunctionReceiverType receiver;
+        Optional<String> receiver;
         if (tokens.peek().type() == TokenType.DOT) {
             tokens.next();
-            receiver = new FunctionReceiverVariable(nameToken.image());
+            receiver = Optional.of(nameToken.image());
             nameToken = tokens.next(TokenType.IDENTIFIER);
         } else {
-            receiver = StandaloneFunctionReceiver.get();
+            receiver = Optional.empty();
         }
 
         List<VariableDeclaration> parameters = new ArrayList<>();
@@ -396,16 +396,16 @@ public class Parser {
             "var x = 1", new VariableDeclaration("x", new NumberExpression(1))));
         testCases.add(new StatementTestCase(
             "def foo() = {}",
-            new UserFunctionDeclaration(new FunctionSignature(StandaloneFunctionReceiver.get(), "foo", List.of(), "void"), new BlockExpression(List.of()))));
+            new UserFunctionDeclaration(new FunctionSignature(Optional.empty(), "foo", List.of(), "void"), new BlockExpression(List.of()))));
         testCases.add(new StatementTestCase(
             "def foo(i) = {}",
-            new UserFunctionDeclaration(new FunctionSignature(StandaloneFunctionReceiver.get(), "foo", List.of(new VariableDeclaration("i")), "void"), new BlockExpression(List.of()))));
+            new UserFunctionDeclaration(new FunctionSignature(Optional.empty(), "foo", List.of(new VariableDeclaration("i")), "void"), new BlockExpression(List.of()))));
         testCases.add(new StatementTestCase(
             "def Foo.foo() = {}",
-            new UserFunctionDeclaration(new FunctionSignature(new FunctionReceiverVariable("Foo"), "foo", List.of(), "void"), new BlockExpression(List.of()))));
+            new UserFunctionDeclaration(new FunctionSignature(Optional.of("Foo"), "foo", List.of(), "void"), new BlockExpression(List.of()))));
         testCases.add(new StatementTestCase(
             "trait Dog { def bark() }",
-            new TraitDefinition("Dog", List.of(new FunctionSignature(StandaloneFunctionReceiver.get(), "bark", List.of(), "void")))));
+            new TraitDefinition("Dog", List.of(new FunctionSignature(Optional.empty(), "bark", List.of(), "void")))));
         testCases.add(new ExpressionTestCase(
             "foo()",
             new FunctionEvaluationExpression("foo", List.of())));
@@ -621,17 +621,6 @@ record FunctionEvaluationExpression(
     }
 }
 
-sealed interface FunctionReceiverType permits FunctionReceiverVariable, StandaloneFunctionReceiver {}
-record FunctionReceiverVariable(
-    String name
-) implements FunctionReceiverType {}
-record StandaloneFunctionReceiver() implements FunctionReceiverType {
-    private static final StandaloneFunctionReceiver INSTANCE = new StandaloneFunctionReceiver();
-    public static StandaloneFunctionReceiver get() {
-        return INSTANCE;
-    }
-}
-
 record IfExpression(
     Expression condition,
     Expression thenBranch,
@@ -687,7 +676,7 @@ record VariableDeclaration(
 }
 
 record FunctionSignature(
-    FunctionReceiverType receiver,
+    Optional<String> receiver,
     String name,
     List<VariableDeclaration> parameters,
     String returnType

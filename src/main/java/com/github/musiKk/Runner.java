@@ -506,10 +506,7 @@ public class Runner implements ConfigReader.ConfigTarget {
 
     static Function registerFunction(FunctionDeclaration functionDeclaration, Scope scope, String moduleName) {
         var functionName = functionDeclaration.signature().name();
-        var lookupName = switch (functionDeclaration.signature().receiver()) {
-            case FunctionReceiverVariable(String name) -> name + "." + functionName;
-            default -> functionName;
-        };
+        var lookupName = functionDeclaration.signature().receiver().map(r -> r + ".").orElse("") + functionName;
         var function = Function.of(moduleName, functionDeclaration, scope);
         scope.putVariable(lookupName, new Variable(new FunctionType(functionName), function));
         return function;
@@ -704,10 +701,7 @@ public class Runner implements ConfigReader.ConfigTarget {
 
     record UserFunction(Optional<String> receiver, String name, List<Parameter> parameters, Expression body, Scope scope) implements Function {
         static UserFunction of(UserFunctionDeclaration functionDeclaration, List<Parameter> parameters, Scope scope) {
-            Optional<String> receiver = switch (functionDeclaration.signature().receiver()) {
-                case FunctionReceiverVariable(String name) -> Optional.of(name);
-                default -> Optional.empty();
-            };
+            Optional<String> receiver = functionDeclaration.signature().receiver();
             return new UserFunction(
                 receiver,
                 functionDeclaration.signature().name(),
