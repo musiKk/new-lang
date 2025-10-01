@@ -133,7 +133,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
                 .filter(s -> !(s instanceof DataDefinition))
                 .filter(s -> !(s instanceof FunctionDeclaration))
                 .forEach(s -> compileStatement(s, new Compiler.Scope(), fb));
-        fb.addExpression(new Output.Return(new Output.NumberExpression(0)));
+        fb.addElement(new Output.Return(new Output.NumberExpression(0)));
         fb.finish();
     }
 
@@ -163,12 +163,12 @@ public class Compiler implements ConfigReader.ConfigTarget {
         var fb = output.function(rv.cName() + "__new", rv.cName());
         dt.dataDefinition().variableDeclarations().stream()
                     .forEach(vd -> fb.parameter(vd.name(), typeRegistry.lookupCName(vd.type().get())));
-        fb.addExpression(new Output.VariableDeclaration("ret", rv.cName()));
-        fb.addExpression(new Output.Assignment("ret", new Output.Allocation(rv.cName())));
+        fb.addElement(new Output.VariableDeclaration("ret", rv.cName()));
+        fb.addElement(new Output.Assignment("ret", new Output.Allocation(rv.cName())));
         dt.dataDefinition().variableDeclarations().forEach(vd -> {
-            fb.addExpression(new Output.FieldAssignment(new Output.NameExpression("ret"), vd.name(), new Output.NameExpression(vd.name())));
+            fb.addElement(new Output.FieldAssignment(new Output.NameExpression("ret"), vd.name(), new Output.NameExpression(vd.name())));
         });
-        fb.addExpression(new Output.Return(new Output.NameExpression("ret")));
+        fb.addElement(new Output.Return(new Output.NameExpression("ret")));
         fb.finish();
     }
 
@@ -191,7 +191,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
                 .forEach(p -> scope.variables.put(p.name(), typeRegistry.lookupCName(p.type().get())));
 
         var result = compileExpression(ufd.body(), scope, function);
-        function.addExpression(new Output.Return(result));
+        function.addElement(new Output.Return(result));
         function.finish();
     }
 
@@ -214,12 +214,12 @@ public class Compiler implements ConfigReader.ConfigTarget {
 
     private void compileStatement(Statement statement, Scope locals, Output.FunctionBuilder fb) {
         switch (statement) {
-            case ExpressionStatement es -> fb.addExpression(compileExpression(es.expression(), locals, fb));
+            case ExpressionStatement es -> fb.addElement(compileExpression(es.expression(), locals, fb));
             case VariableDeclaration vd -> {
                 Optional<Output.Expression> initStatement = vd.initializer().map(e -> compileExpression(e, locals, fb));
                 locals.variables.put(vd.name(), typeRegistry.lookupCName(vd.type().get()));
-                fb.addExpression(new Output.VariableDeclaration(vd.name(), typeRegistry.lookupCName(vd.type().get())));
-                initStatement.ifPresent(is -> fb.addExpression(new Output.Assignment(vd.name(), is)));
+                fb.addElement(new Output.VariableDeclaration(vd.name(), typeRegistry.lookupCName(vd.type().get())));
+                initStatement.ifPresent(is -> fb.addElement(new Output.Assignment(vd.name(), is)));
             }
             default -> throw new RuntimeException(statement.toString());
         }
@@ -231,8 +231,8 @@ public class Compiler implements ConfigReader.ConfigTarget {
             case StringExpression(String s) -> {
                 var stringCType = typeRegistry.lookupCName("String");
                 var stringVarName = locals.newTemp(stringCType);
-                fb.addExpression(new Output.VariableDeclaration(stringVarName, stringCType));
-                fb.addExpression(new Output.Assignment(stringVarName, new Output.FunctionEvaluation("String__native_new_copy", List.of(new Output.StringLiteral(s)))));
+                fb.addElement(new Output.VariableDeclaration(stringVarName, stringCType));
+                fb.addElement(new Output.Assignment(stringVarName, new Output.FunctionEvaluation("String__native_new_copy", List.of(new Output.StringLiteral(s)))));
 
                 yield new Output.NameExpression(stringVarName);
             }
@@ -253,13 +253,17 @@ public class Compiler implements ConfigReader.ConfigTarget {
             }
             case BlockExpression be -> {
                 var stmts = be.statements();
-                var returnStatement = ((ExpressionStatement) stmts.getLast()).expression();
+                var returnStatement = stmts.getLast();
+                if (!(returnStatement instanceof ExpressionStatement)) {
+                    throw new RuntimeException("last statement in block must be an expression: " + be);
+                }
                 for (int i = 0; i <= stmts.size() - 1; i++) {
                     var stmt = stmts.get(i);
                     compileStatement(stmt, locals, fb);
                 }
 
-                var compiledReturn = compileExpression(returnStatement, locals, fb);
+                var returnExpression = ((ExpressionStatement) returnStatement).expression();
+                var compiledReturn = compileExpression(returnExpression, locals, fb);
                 String tmpType = switch (compiledReturn) {
                     case Output.NumberExpression(long n) -> "Int";
                     case Output.NameExpression(String n) -> locals.variables.get(n);
@@ -270,8 +274,8 @@ public class Compiler implements ConfigReader.ConfigTarget {
                 var resultVarDecl = new Output.VariableDeclaration(tmpName, tmpType);
                 var resultVarAssign = new Output.Assignment(tmpName, compiledReturn);
 
-                fb.addExpression(resultVarDecl);
-                fb.addExpression(resultVarAssign);
+                fb.addElement(resultVarDecl);
+                fb.addElement(resultVarAssign);
 
                 yield new Output.NameExpression(tmpName);
             }
@@ -310,7 +314,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
             }
         }
 
-        record Function(String cName, String returnType, List<Parameter> parameters, List<Output.Expression> body) {};
+        record Function(String cName, String returnType, List<Parameter> parameters, List<Output.Element> body) {};
         record Parameter(String name, String type) {};
 
         @RequiredArgsConstructor
@@ -318,11 +322,11 @@ public class Compiler implements ConfigReader.ConfigTarget {
             final String cName;
             final String returnType;
             final List<Parameter> parameters = new ArrayList<>();
-            final List<Expression> body = new ArrayList<>();
+            final List<Element> body = new ArrayList<>();
             void parameter(String name, String type) {
                 parameters.add(new Parameter(name, type));
             }
-            void addExpression(Output.Expression e) {
+            void addElement(Output.Element e) {
                 body.add(e);
             }
             void finish() {
@@ -345,19 +349,22 @@ public class Compiler implements ConfigReader.ConfigTarget {
             }
         }
 
-        static interface Expression {}
+        interface Element {}
+        interface Expression extends Element {}
+        interface Statement extends Element {}
         record NumberExpression(long l) implements Expression {}
         record StringLiteral(String s) implements Expression {}
         record NameExpression(String name) implements Expression {}
         record BinaryExpression(Expression left, String op, Expression right) implements Expression {}
         record Block(List<Expression> expressions) implements Expression {}
-        record VariableDeclaration(String name, String type) implements Expression {}
-        record Assignment(String name, Expression right) implements Expression {}
-        record FieldAssignment(Expression target, String field, Expression right) implements Expression {}
         record FieldAccess(Expression target, String field) implements Expression {}
         record Allocation(String type) implements Expression {}
-        record Return(Expression retval) implements Expression {}
         record FunctionEvaluation(String name, List<Expression> arguments) implements Expression {}
+
+        record VariableDeclaration(String name, String type) implements Statement {}
+        record Assignment(String name, Expression right) implements Statement {}
+        record FieldAssignment(Expression target, String field, Expression right) implements Statement {}
+        record Return(Expression retval) implements Statement {}
     }
 
     static class OutputEmitter implements AutoCloseable {
@@ -393,7 +400,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
             outdent();
             emitLineNl(") {", true);
             indent();
-            for (Output.Expression e : function.body) {
+            for (Output.Element e : function.body) {
                 emitExpression(e, true);
                 emitLineNl(";", false);
             }
@@ -401,7 +408,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
             emitLineNl("}", true);
         }
 
-        void emitExpression(Output.Expression e, boolean doIndent) {
+        void emitExpression(Output.Element e, boolean doIndent) {
             switch (e) {
                 case Output.NumberExpression n -> emitLine(Long.toString(n.l), doIndent);
                 case Output.StringLiteral s -> emitLine("\""  + s.s + "\"", doIndent);
