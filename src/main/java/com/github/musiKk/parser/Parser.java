@@ -1,12 +1,39 @@
-package com.github.musiKk;
+package com.github.musiKk.parser;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.BiFunction;
 
+import com.github.musiKk.Tokenizer;
 import com.github.musiKk.Tokenizer.TokenType;
 import com.github.musiKk.Tokenizer.Tokens;
+import com.github.musiKk.parser.CompilationUnit.ArrayAssignmentExpression;
+import com.github.musiKk.parser.CompilationUnit.ArrayCreationExpression;
+import com.github.musiKk.parser.CompilationUnit.ArrayLookupExpression;
+import com.github.musiKk.parser.CompilationUnit.AssignmentExpression;
+import com.github.musiKk.parser.CompilationUnit.BinaryExpression;
+import com.github.musiKk.parser.CompilationUnit.BlockExpression;
+import com.github.musiKk.parser.CompilationUnit.BooleanExpression;
+import com.github.musiKk.parser.CompilationUnit.DataDefinition;
+import com.github.musiKk.parser.CompilationUnit.Expression;
+import com.github.musiKk.parser.CompilationUnit.ExpressionStatement;
+import com.github.musiKk.parser.CompilationUnit.ForExpression;
+import com.github.musiKk.parser.CompilationUnit.FunctionDeclaration;
+import com.github.musiKk.parser.CompilationUnit.FunctionEvaluationExpression;
+import com.github.musiKk.parser.CompilationUnit.FunctionSignature;
+import com.github.musiKk.parser.CompilationUnit.IfExpression;
+import com.github.musiKk.parser.CompilationUnit.Import;
+import com.github.musiKk.parser.CompilationUnit.NativeFunctionDeclaration;
+import com.github.musiKk.parser.CompilationUnit.NullExpression;
+import com.github.musiKk.parser.CompilationUnit.NumberExpression;
+import com.github.musiKk.parser.CompilationUnit.Statement;
+import com.github.musiKk.parser.CompilationUnit.StringExpression;
+import com.github.musiKk.parser.CompilationUnit.TraitDefinition;
+import com.github.musiKk.parser.CompilationUnit.TraitImplementation;
+import com.github.musiKk.parser.CompilationUnit.UserFunctionDeclaration;
+import com.github.musiKk.parser.CompilationUnit.VariableDeclaration;
+import com.github.musiKk.parser.CompilationUnit.VariableExpression;
 
 public class Parser {
 
@@ -561,141 +588,3 @@ public class Parser {
     }
 
 }
-
-sealed interface Statement {}
-
-record ExpressionStatement(
-    Expression expression
-) implements Statement {}
-
-sealed interface Expression {}
-
-record NullExpression() implements Expression {}
-record BooleanExpression(
-    boolean value
-) implements Expression {}
-record AssignmentExpression(
-    VariableExpression target,
-    Expression value
-) implements Expression {}
-record ArrayAssignmentExpression(
-    ArrayLookupExpression target,
-    Expression value
-) implements Expression {}
-record BlockExpression(
-    List<Statement> statements
-) implements Expression {}
-record NumberExpression(
-    long number
-) implements Expression {}
-record StringExpression(
-    String string
-) implements Expression {}
-record VariableExpression(
-    Optional<Expression> target,
-    String name
-) implements Expression {
-    public VariableExpression(String name) {
-        this(Optional.empty(), name);
-    }
-    public VariableExpression(Expression target, String name) {
-        this(Optional.of(target), name);
-    }
-}
-record BinaryExpression(
-    Expression left,
-    TokenType operator,
-    Expression right
-) implements Expression {}
-
-record FunctionEvaluationExpression(
-    Optional<Expression> target,
-    String name,
-    List<Expression> arguments
-) implements Expression {
-    public FunctionEvaluationExpression(String name, List<Expression> arguments) {
-        this(Optional.empty(), name, arguments);
-    }
-    public FunctionEvaluationExpression(Expression target, String name, List<Expression> arguments) {
-        this(Optional.of(target), name, arguments);
-    }
-}
-
-record IfExpression(
-    Expression condition,
-    Expression thenBranch,
-    Optional<Expression> elseBranch
-) implements Expression {}
-
-record ForExpression(
-    Expression condition,
-    Expression body
-) implements Expression {}
-
-record ArrayCreationExpression(
-    String typeName,
-    Optional<Expression> lengthExpression,
-    List<Expression> initializations
-) implements Expression {}
-
-record ArrayLookupExpression(
-    Expression target,
-    Expression indexExpression
-) implements Expression {}
-
-record Import(String name) implements Statement {}
-
-sealed interface FunctionDeclaration extends Statement {
-    FunctionSignature signature();
-}
-record NativeFunctionDeclaration(
-    FunctionSignature signature
-) implements FunctionDeclaration {
-}
-record UserFunctionDeclaration(
-    FunctionSignature signature,
-    Expression body
-) implements FunctionDeclaration {}
-record VariableDeclaration(
-    String name,
-    Optional<String> type,
-    Optional<Expression> initializer
-) implements Statement {
-    public VariableDeclaration(String name) {
-        this(name, Optional.empty(), Optional.empty());
-    }
-    public VariableDeclaration(String name, Optional<String> type) {
-        this(name, type, Optional.empty());
-    }
-    public VariableDeclaration(String name, String type) {
-        this(name, Optional.of(type), Optional.empty());
-    }
-    public VariableDeclaration(String name, Expression initializer) {
-        this(name, Optional.empty(), Optional.of(initializer));
-    }
-}
-
-record FunctionSignature(
-    Optional<String> receiver,
-    String name,
-    List<VariableDeclaration> parameters,
-    String returnType
-) {}
-
-record DataDefinition(
-    String name,
-    List<VariableDeclaration> variableDeclarations
-) implements Statement {}
-record TraitDefinition(
-    String name,
-    List<FunctionSignature> functionSignatures
-) implements Statement {}
-record TraitImplementation(
-    String typeName,
-    String traitName,
-    List<FunctionDeclaration> functionDeclarations
-) implements Statement {}
-
-record CompilationUnit(
-    List<Statement> statements
-) {}

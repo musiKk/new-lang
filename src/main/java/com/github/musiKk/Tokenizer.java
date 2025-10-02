@@ -169,12 +169,12 @@ public class Tokenizer {
         }
     }
 
-    record Token(TokenType type, String image, int start, int end) {
+    public record Token(TokenType type, String image, int start, int end) {
         int length() {
             return end - start;
         }
     }
-    enum TokenType {
+    public enum TokenType {
         IMPORT("import"),
         DATA("data"),
         TRAIT("trait"),
@@ -222,7 +222,7 @@ public class Tokenizer {
         }
     }
 
-    static class Tokens {
+    public static class Tokens {
         final List<Token> tokens;
         int index;
 
