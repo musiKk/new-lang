@@ -6,11 +6,13 @@ import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import com.github.musiKk.parser.AstTyper;
 import com.github.musiKk.parser.CompilationUnit;
 import com.github.musiKk.parser.CompilationUnit.BinaryExpression;
 import com.github.musiKk.parser.CompilationUnit.BlockExpression;
@@ -19,6 +21,8 @@ import com.github.musiKk.parser.CompilationUnit.Expression;
 import com.github.musiKk.parser.CompilationUnit.ExpressionStatement;
 import com.github.musiKk.parser.CompilationUnit.FunctionDeclaration;
 import com.github.musiKk.parser.CompilationUnit.FunctionEvaluationExpression;
+import com.github.musiKk.parser.CompilationUnit.FunctionSignature;
+import com.github.musiKk.parser.CompilationUnit.NativeFunctionDeclaration;
 import com.github.musiKk.parser.CompilationUnit.NumberExpression;
 import com.github.musiKk.parser.CompilationUnit.Statement;
 import com.github.musiKk.parser.CompilationUnit.StringExpression;
@@ -63,6 +67,28 @@ public class Compiler implements ConfigReader.ConfigTarget {
         // perform following phases per file
         // TODO we only parse the main file for now
         var cu = parseCompilationUnit(resolvedPath);
+
+        // typer test
+        var typer = new AstTyper(cu);
+        typer.getFunctionRegistry().registerFunction(
+            new NativeFunctionDeclaration(new FunctionSignature(
+                Optional.empty(),
+                "print",
+                List.of(new VariableDeclaration("", "String")),
+                "void"
+            ))
+        );
+        typer.getFunctionRegistry().registerFunction(
+            new NativeFunctionDeclaration(new FunctionSignature(
+                Optional.of("Int"),
+                "toString",
+                Collections.emptyList(),
+                "String"
+            ))
+        );
+        var tcu = typer.resolveTypes();
+        System.err.println(tcu);
+        // typer test end
 
         // 2. phase: collect all types and put into type registry
         collectTypes(cu);
