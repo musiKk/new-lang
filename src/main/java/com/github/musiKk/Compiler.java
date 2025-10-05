@@ -14,60 +14,67 @@ import java.util.Optional;
 
 import com.github.musiKk.parser.AstTyper;
 import com.github.musiKk.parser.CompilationUnit;
-import com.github.musiKk.parser.CompilationUnit.BinaryExpression;
-import com.github.musiKk.parser.CompilationUnit.BlockExpression;
-import com.github.musiKk.parser.CompilationUnit.DataDefinition;
-import com.github.musiKk.parser.CompilationUnit.Expression;
-import com.github.musiKk.parser.CompilationUnit.ExpressionStatement;
-import com.github.musiKk.parser.CompilationUnit.FunctionDeclaration;
-import com.github.musiKk.parser.CompilationUnit.FunctionEvaluationExpression;
 import com.github.musiKk.parser.CompilationUnit.FunctionSignature;
-import com.github.musiKk.parser.CompilationUnit.NumberExpression;
-import com.github.musiKk.parser.CompilationUnit.Statement;
-import com.github.musiKk.parser.CompilationUnit.StringExpression;
-import com.github.musiKk.parser.CompilationUnit.UserFunctionDeclaration;
 import com.github.musiKk.parser.CompilationUnit.VariableDeclaration;
-import com.github.musiKk.parser.CompilationUnit.VariableExpression;
 import com.github.musiKk.parser.Parser;
+import com.github.musiKk.parser.TCompilationUnit;
+import com.github.musiKk.parser.TCompilationUnit.TBinaryExpression;
+import com.github.musiKk.parser.TCompilationUnit.TBlockExpression;
+import com.github.musiKk.parser.TCompilationUnit.TDataDefinition;
+import com.github.musiKk.parser.TCompilationUnit.TExpression;
+import com.github.musiKk.parser.TCompilationUnit.TExpressionStatement;
+import com.github.musiKk.parser.TCompilationUnit.TFunctionEvaluationExpression;
+import com.github.musiKk.parser.TCompilationUnit.TNativeFunctionDeclaration;
+import com.github.musiKk.parser.TCompilationUnit.TNumberExpression;
+import com.github.musiKk.parser.TCompilationUnit.TStatement;
+import com.github.musiKk.parser.TCompilationUnit.TStringExpression;
+import com.github.musiKk.parser.TCompilationUnit.TUserFunctionDeclaration;
+import com.github.musiKk.parser.TCompilationUnit.TVariableDeclaration;
+import com.github.musiKk.parser.TCompilationUnit.TVariableExpression;
+import com.github.musiKk.parser.Type;
 
 import lombok.AllArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
-import lombok.ToString;
-
-public class Compiler implements ConfigReader.ConfigTarget {
+import lombok.ToString;class Compiler implements ConfigReader.ConfigTarget {
 
     @Setter
     private List<String> lookupPath = new ArrayList<>();
     @Setter
     private String target;
 
-    private TypeRegistry typeRegistry = new TypeRegistry();
-    private FunctionRegistry functionRegistry = new FunctionRegistry();
+    private TypeNameMapper typeNameMapper = new TypeNameMapper();
+    private FunctionNameMapper functionNameMapper = new FunctionNameMapper();
 
     public static void main(String[] args) {
         var compiler = new Compiler();
         ConfigReader.readConfig().applyConfig(compiler);
-        var output = compiler.compileProgram("test.tst");
-        System.err.println(output);
+        compiler.compileProgram("test.tst");
     }
 
     /**
      * Compiles an executable starting at {@code pathString}.
      * @param pathString
      */
-    public Output compileProgram(String pathString) {
-        registerBasicTypes();
-
+    public void compileProgram(String pathString) {
         Path.of(target).toFile().mkdirs();
         var resolvedPath = resolvePath(pathString);
 
-        // 1. phase: collect all files needed by following imports
-        // perform following phases per file
         // TODO we only parse the main file for now
         var cu = parseCompilationUnit(resolvedPath);
+        var tcu = typeCompilationUnit(cu);
 
-        // typer test
+        var output = new Output();
+        compileCompilationUnit(tcu, output);
+
+        try {
+            output.emit(Path.of(target, resolvedPath.getFileName().toString().replace(".tst", ".c")));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private TCompilationUnit typeCompilationUnit(CompilationUnit cu) {
         var typer = new AstTyper(cu);
         // XXX this is a hack; the typer should be able to resolve this on its own
         typer.addPrototype(
@@ -86,53 +93,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
                 "String"
             )
         );
-        var tcu = typer.resolveTypes();
-        System.err.println(tcu);
-        // typer test end
-
-        // 2. phase: collect all types and put into type registry
-        collectTypes(cu);
-        // 3. phase: collect all functions
-        collectFunctions(cu);
-
-        var output = new Output();
-        compileCompilationUnit(cu, output);
-
-        try {
-            output.emit(Path.of(target, resolvedPath.getFileName().toString().replace(".tst", ".c")));
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-
-        return output;
-    }
-
-    private void registerBasicTypes() {
-        typeRegistry.register(new Type.IntType());
-        typeRegistry.register(new Type.StringType());
-
-        functionRegistry.register("print",
-                new FunctionRegistry.Function(
-                        Optional.empty(),
-                        "print",
-                        "void",
-                        List.of(new FunctionRegistry.Function.Parameter("s", typeRegistry.lookupCName("String")))));
-        functionRegistry.register("toString",
-                new FunctionRegistry.Function(
-                        Optional.of("Int"),
-                        "toString",
-                        "String",
-                        List.of()));
-    }
-
-    private void collectFunctions(CompilationUnit cu) {
-        var fc = new FunctionCollector(functionRegistry, cu);
-        fc.run();
-    }
-
-    private void collectTypes(CompilationUnit cu) {
-        var tc = new TypeCollector(typeRegistry, cu);
-        tc.run();
+        return typer.resolveTypes();
     }
 
     private CompilationUnit parseCompilationUnit(Path resolvedPath) {
@@ -157,80 +118,78 @@ public class Compiler implements ConfigReader.ConfigTarget {
         return resolvedPath;
     }
 
-    private void compileCompilationUnit(CompilationUnit cu, Output output) {
-        // 1. compile types
-        typeRegistry.map.values().stream()
-                .forEach(t -> compileType(t, output));
+    private void compileCompilationUnit(TCompilationUnit cu, Output output) {
+        var statementCollection = new Object() {
+            List<TDataDefinition> dds = new ArrayList<>();
+            List<TUserFunctionDeclaration> ufds = new ArrayList<>();
+            List<TStatement> stmts = new ArrayList<>();
+        };
 
-        // 2. compile functions
-        functionRegistry.declaredFunctions.stream()
-                .forEach(fd -> compileFunctionDefinition(fd, output));
+        cu.statements().stream()
+                .forEach(stmt -> {
+                    switch (stmt) {
+                        case TDataDefinition dd -> statementCollection.dds.add(dd);
+                        case TUserFunctionDeclaration ufd -> statementCollection.ufds.add(ufd);
+                        case TNativeFunctionDeclaration __ -> {}
+                        default -> statementCollection.stmts.add(stmt);
+                    }
+                });
 
-        compileMain(cu, output);
+        statementCollection.dds.stream()
+                .forEach(dd -> compileType(dd, output));
+        statementCollection.ufds.stream()
+                .forEach(ufd -> compileFunctionDefinition(ufd, output));
+
+        compileMain(statementCollection.stmts, output);
     }
 
-    private void compileMain(CompilationUnit cu, Output output) {
+    private void compileMain(List<TStatement> statements, Output output) {
+        var mainScope = new Compiler.Scope();
         var fb = output.function("main", "int");
-        cu.statements().stream()
-                .filter(s -> !(s instanceof DataDefinition))
-                .filter(s -> !(s instanceof FunctionDeclaration))
-                .forEach(s -> compileStatement(s, new Compiler.Scope(), fb));
+        statements.stream()
+                .forEach(s -> compileStatement(s, mainScope, fb));
         fb.addElement(new Output.Return(new Output.NumberExpression(0)));
         fb.finish();
     }
 
-    private void compileType(Registry.RegistryValue<Type> rv, Output output) {
-        if (!(rv.parsedStatement() instanceof Type.DataType)) return;
+    private void compileType(TDataDefinition dd, Output output) {
+        var typeCName = typeNameMapper.getCName(Type.of(dd.name()));
 
-        var dt = (Type.DataType) rv.parsedStatement();
-
-        var struct = output.struct(rv.cName());
-        dt.dataDefinition().variableDeclarations().stream()
+        var struct = output.struct(typeCName);
+        dd.variableDeclarations().stream()
                 .forEach(vd -> {
-                    String propertyType = typeRegistry.lookupCName(vd.type().get());
+                    String propertyType = typeNameMapper.getCName(vd.type());
                     String propertyName = vd.name();
 
                     struct.field(propertyName, propertyType);
                 });
         struct.finish();
 
-        functionRegistry.register(dt.getName(), new FunctionRegistry.Function(
-            Optional.empty(),
-            rv.cName() + "__new",
-            rv.parsedStatement().getName(),
-            dt.dataDefinition().variableDeclarations().stream()
-                    .map(vd -> new FunctionRegistry.Function.Parameter(vd.name(), vd.type().get()))
-                    .toList()
-        ));
-        var fb = output.function(rv.cName() + "__new", rv.cName());
-        dt.dataDefinition().variableDeclarations().stream()
-                    .forEach(vd -> fb.parameter(vd.name(), typeRegistry.lookupCName(vd.type().get())));
-        fb.addElement(new Output.VariableDeclaration("ret", rv.cName()));
-        fb.addElement(new Output.Assignment("ret", new Output.Allocation(rv.cName())));
-        dt.dataDefinition().variableDeclarations().forEach(vd -> {
+        var fb = output.function(typeCName + "__new", typeCName);
+        dd.variableDeclarations().stream()
+                    .forEach(vd -> fb.parameter(vd.name(), typeNameMapper.getCName(vd.type())));
+        fb.addElement(new Output.VariableDeclaration("ret", typeCName));
+        fb.addElement(new Output.Assignment("ret", new Output.Allocation(typeCName)));
+        dd.variableDeclarations().forEach(vd -> {
             fb.addElement(new Output.FieldAssignment(new Output.NameExpression("ret"), vd.name(), new Output.NameExpression(vd.name())));
         });
         fb.addElement(new Output.Return(new Output.NameExpression("ret")));
         fb.finish();
+
+        functionNameMapper.add(typeCName, typeCName + "__new");
     }
 
-    private void compileFunctionDefinition(FunctionDeclaration fd, Output output) {
-        if (!(fd instanceof UserFunctionDeclaration)) {
-            return;
-        }
-        UserFunctionDeclaration ufd = (UserFunctionDeclaration) fd;
-
+    private void compileFunctionDefinition(TUserFunctionDeclaration ufd, Output output) {
         var signature = ufd.signature();
-        var function = output.function(functionRegistry.lookupCName(signature.name()), typeRegistry.lookupCName(signature.returnType()));
+
+        var functionName = functionNameMapper.getCName(signature.receiver(), signature.name());
+        var function = output.function(functionName, typeNameMapper.getCName(signature.returnType()));
         var scope = new Scope();
-        signature.receiver().map(typeRegistry::lookupCName).ifPresent(receiverType -> {
-            function.parameter("self", receiverType);
-            scope.variables.put("self", receiverType);
-        });
         signature.parameters().stream()
-                .forEach(p -> function.parameter(p.name(), typeRegistry.lookupCName(p.type().get())));
-        signature.parameters().stream()
-                .forEach(p -> scope.variables.put(p.name(), typeRegistry.lookupCName(p.type().get())));
+                .forEach(p -> {
+                    function.parameter(p.name(), typeNameMapper.getCName(p.type()));
+                    scope.variables.put(p.name(), typeNameMapper.getCName(p.type()));
+                });
 
         var result = compileExpression(ufd.body(), scope, function);
         function.addElement(new Output.Return(result));
@@ -243,60 +202,61 @@ public class Compiler implements ConfigReader.ConfigTarget {
 
         int count = 0;
 
-        public String newTemp(String tmpType) {
+        public String newTemp(String type) {
             while (true) {
                 String tmpCand = "tmp_" + (count++);
                 if (!variables.containsKey(tmpCand)) {
-                    variables.put(tmpCand, tmpType);
+                    variables.put(tmpCand, type);
                     return tmpCand;
                 }
             }
         }
     }
 
-    private void compileStatement(Statement statement, Scope locals, Output.FunctionBuilder fb) {
+    private void compileStatement(TStatement statement, Scope locals, Output.FunctionBuilder fb) {
         switch (statement) {
-            case ExpressionStatement es -> fb.addElement(compileExpression(es.expression(), locals, fb));
-            case VariableDeclaration vd -> {
+            case TExpressionStatement es -> fb.addElement(compileExpression(es.expression(), locals, fb));
+            case TVariableDeclaration vd -> {
                 Optional<Output.Expression> initStatement = vd.initializer().map(e -> compileExpression(e, locals, fb));
-                locals.variables.put(vd.name(), typeRegistry.lookupCName(vd.type().get()));
-                fb.addElement(new Output.VariableDeclaration(vd.name(), typeRegistry.lookupCName(vd.type().get())));
+                locals.variables.put(vd.name(), typeNameMapper.getCName(vd.type()));
+                fb.addElement(new Output.VariableDeclaration(vd.name(), typeNameMapper.getCName(vd.type())));
                 initStatement.ifPresent(is -> fb.addElement(new Output.Assignment(vd.name(), is)));
             }
             default -> throw new RuntimeException(statement.toString());
         }
     }
 
-    private Output.Expression compileExpression(Expression parsedExpression, Scope locals, Output.FunctionBuilder fb) {
+    private Output.Expression compileExpression(TExpression parsedExpression, Scope locals, Output.FunctionBuilder fb) {
         return switch (parsedExpression) {
-            case NumberExpression(long n) -> new Output.NumberExpression(n);
-            case StringExpression(String s) -> {
-                var stringCType = typeRegistry.lookupCName("String");
+            case TNumberExpression(long n) -> new Output.NumberExpression(n);
+            case TStringExpression se -> {
+                var stringCType = typeNameMapper.getCName(se.type());
                 var stringVarName = locals.newTemp(stringCType);
                 fb.addElement(new Output.VariableDeclaration(stringVarName, stringCType));
-                fb.addElement(new Output.Assignment(stringVarName, new Output.FunctionEvaluation("String__native_new_copy", List.of(new Output.StringLiteral(s)))));
+                fb.addElement(new Output.Assignment(stringVarName, new Output.FunctionEvaluation("String__native_new_copy", List.of(new Output.StringLiteral(se.string())))));
 
                 yield new Output.NameExpression(stringVarName);
             }
-            case VariableExpression(var target, String name) when target.isEmpty() -> {
-                if (!locals.variables.containsKey(name)) {
-                    throw new RuntimeException("name " + name + " not found");
+            case TVariableExpression ve when ve.target().isEmpty() -> {
+                if (!locals.variables.containsKey(ve.name())) {
+                    throw new RuntimeException("name " + ve.name() + " not found");
                 }
-                yield new Output.NameExpression(name);
+                yield new Output.NameExpression(ve.name());
             }
-            case VariableExpression(var target, String name) when target.isPresent() -> {
-                var compiledTarget = compileExpression(target.get(), locals, fb);
-                yield new Output.FieldAccess(compiledTarget, name);
+            case TVariableExpression ve when ve.target().isPresent() -> {
+                var compiledTarget = compileExpression(ve.target().get(), locals, fb);
+                // TODO this could be module access in the future
+                yield new Output.FieldAccess(compiledTarget, ve.name());
             }
-            case BinaryExpression be -> {
+            case TBinaryExpression be -> {
                 var left = compileExpression(be.left(), locals, fb);
                 var right = compileExpression(be.right(), locals, fb);
                 yield new Output.BinaryExpression(left, be.operator().constantPattern, right);
             }
-            case BlockExpression be -> {
+            case TBlockExpression be -> {
                 var stmts = be.statements();
                 var returnStatement = stmts.getLast();
-                if (!(returnStatement instanceof ExpressionStatement)) {
+                if (!(returnStatement instanceof TExpressionStatement)) {
                     throw new RuntimeException("last statement in block must be an expression: " + be);
                 }
                 for (int i = 0; i <= stmts.size() - 1; i++) {
@@ -304,16 +264,11 @@ public class Compiler implements ConfigReader.ConfigTarget {
                     compileStatement(stmt, locals, fb);
                 }
 
-                var returnExpression = ((ExpressionStatement) returnStatement).expression();
+                var returnExpression = ((TExpressionStatement) returnStatement).expression();
                 var compiledReturn = compileExpression(returnExpression, locals, fb);
-                String tmpType = switch (compiledReturn) {
-                    case Output.NumberExpression(long n) -> "Int";
-                    case Output.NameExpression(String n) -> locals.variables.get(n);
-                    default -> "void*";
-                };
-                var tmpName = locals.newTemp(tmpType);
+                var tmpName = locals.newTemp(typeNameMapper.getCName(returnExpression.type()));
 
-                var resultVarDecl = new Output.VariableDeclaration(tmpName, tmpType);
+                var resultVarDecl = new Output.VariableDeclaration(tmpName, typeNameMapper.getCName(returnExpression.type()));
                 var resultVarAssign = new Output.Assignment(tmpName, compiledReturn);
 
                 fb.addElement(resultVarDecl);
@@ -321,7 +276,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
 
                 yield new Output.NameExpression(tmpName);
             }
-            case FunctionEvaluationExpression fee -> {
+            case TFunctionEvaluationExpression fee -> {
                 List<Output.Expression> args = new ArrayList<>();
                 fee.target()
                         .map(e -> compileExpression(e, locals, fb))
@@ -329,7 +284,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
                 fee.arguments().stream()
                         .map(e -> compileExpression(e, locals, fb))
                         .forEach(args::add);
-                var fName = functionRegistry.lookupCName(fee.name());
+                var fName = functionNameMapper.getCName(fee.target().map(TExpression::type), fee.name());
 
                 yield new Output.FunctionEvaluation(fName, args);
             }
@@ -553,155 +508,28 @@ public class Compiler implements ConfigReader.ConfigTarget {
         }
     }
 
-}
-
-abstract class Registry<T> {
-    Map<String, RegistryValue<T>> map = new HashMap<>();
-
-    void register(T parsedStatement) {
-        var sourceName = getSourceName(parsedStatement);
-        register(sourceName, parsedStatement);
-    }
-
-    void register(String sourceName, T parsedStatement) {
-        if (map.containsKey(sourceName)) {
-            throw new RuntimeException(sourceName + " already defined");
+    class TypeNameMapper {
+        String getCName(Type type) {
+            return type.name();
         }
-        map.put(sourceName, new RegistryValue<>(generateCName(parsedStatement), parsedStatement));
     }
 
-    String lookupCName(String name) {
-        return map.get(name).cName;
-    }
-
-    RegistryValue<T> lookupRegistryValue(String name) {
-        return map.get(name);
-    }
-
-    protected abstract String getSourceName(T parsedStatement);
-    protected abstract String generateCName(T parsedStatement);
-
-    record RegistryValue<T>(String cName, T parsedStatement) {};
-}
-
-class FunctionRegistry extends Registry<FunctionRegistry.Function> {
-
-    List<FunctionDeclaration> declaredFunctions = new ArrayList<>();
-
-    @Override
-    protected String getSourceName(FunctionRegistry.Function f) {
-        return f.name();
-    }
-
-    @Override
-    protected String generateCName(FunctionRegistry.Function f) {
-        return f.target.map(n -> n + "__").orElse("") + f.name;
-    }
-
-    static record Function(
-            Optional<String> target,
-            String name,
-            String type,
-            List<Parameter> parameters) {
-        record Parameter(String name, String type) {}
-    }
-
-}
-
-@AllArgsConstructor
-class FunctionCollector {
-    FunctionRegistry functionRegistry;
-    CompilationUnit cu;
-    void run() {
-        // TODO only top-level functions recognized for now
-        List<FunctionDeclaration> functionDeclarations = new ArrayList<>();
-        for (var stmt : cu.statements()) {
-            switch (stmt) {
-                case FunctionDeclaration fd -> {
-                    functionRegistry.register(toFunction(fd));
-                    functionDeclarations.add(fd);
-                }
-                default -> {}
+    class FunctionNameMapper {
+        final Map<String, String> map = new HashMap<>();
+        String getCName(Optional<Type> target, String name) {
+            var candName = target.map(t -> t.name() + "__").orElse("") + name;
+            if (map.containsKey(candName)) {
+                return map.get(candName);
             }
+            return candName;
         }
-        functionRegistry.declaredFunctions.addAll(functionDeclarations);
-    }
-    static FunctionRegistry.Function toFunction(FunctionDeclaration fd) {
-        var sig = fd.signature();
-        return new FunctionRegistry.Function(
-                sig.receiver(),
-                sig.name(),
-                sig.returnType(),
-                sig.parameters().stream()
-                        .map(p -> new FunctionRegistry.Function.Parameter(p.name(), p.type().get()))
-                        .toList());
-    }
-}
 
-@AllArgsConstructor
-class TypeCollector {
-    TypeRegistry typeRegistry;
-    CompilationUnit cu;
-    void run() {
-        // TODO only top-level types recognized for now
-        for (var stmt : cu.statements()) {
-            switch (stmt) {
-                case DataDefinition dd -> registerType(dd);
-                default -> {}
+        public void add(String sourceName, String cName) {
+            if (map.containsKey(sourceName)) {
+                throw new RuntimeException("duplicate function name " + sourceName);
             }
+            map.put(sourceName, cName);
         }
-    }
-    void registerType(DataDefinition dd) {
-        typeRegistry.register(new Type.DataType(dd));
-    }
-}
-
-class TypeRegistry extends Registry<Type> {
-
-    @Override
-    protected String getSourceName(Type type) {
-        return type.getName();
     }
 
-    @Override
-    protected String generateCName(Type type) {
-        return type.getCRepresentation();
-    }
-}
-
-interface Type {
-    String getName();
-    String getCRepresentation();
-    record StringType() implements Type {
-        @Override
-        public String getName() {
-            return "String";
-        }
-
-        @Override
-        public String getCRepresentation() {
-            return "String";
-        }
-
-    }
-    record IntType() implements Type {
-        @Override
-        public String getName() {
-            return "Int";
-        }
-        @Override
-        public String getCRepresentation() {
-            return "int";
-        }
-    }
-    record DataType(DataDefinition dataDefinition) implements Type {
-        @Override
-        public String getName() {
-            return dataDefinition.name();
-        }
-        @Override
-        public String getCRepresentation() {
-            return dataDefinition.name();
-        }
-    }
 }

@@ -3,6 +3,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include "rt.h"
 
 struct String__struct {
@@ -28,6 +29,8 @@ String String__native_new_copy(char *buf) {
     ret -> len = len;
     return ret;
 }
+
+#define Int int_fast64_t
 
 String Int__toString(int i) {
     int len = snprintf(NULL, 0, "%d", i);

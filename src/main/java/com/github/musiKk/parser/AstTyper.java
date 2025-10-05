@@ -53,14 +53,13 @@ public class AstTyper {
         collectTypes();
         collectFunctions();
 
-        var scope = Scope.EMPTY;
+        var scope = Scope.EMPTY.newScope();
         return typeCompilationUnit(cu, scope);
     }
 
     private TCompilationUnit typeCompilationUnit(CompilationUnit cu, Scope scope) {
         return new TCompilationUnit(
             cu.statements().stream()
-                .filter(s -> !(s instanceof DataDefinition))
                 .map(s -> typeStatement(s, scope))
                 .toList()
         );
@@ -70,6 +69,7 @@ public class AstTyper {
         return switch (statement) {
             case ExpressionStatement es -> new TExpressionStatement(typeExpression(es.expression(), scope));
             case VariableDeclaration vd -> typeVariableDeclaration(vd, scope);
+            case DataDefinition dd -> dataRegistry.map.get(Type.of(dd.name()));
             case UserFunctionDeclaration ufd -> {
                 var sig = ufd.signature();
                 var receiverType = sig.receiver().map(Type::of);
@@ -200,7 +200,6 @@ public class AstTyper {
         }
 
         Function lookup(Optional<Type> receiver, String name) {
-            System.err.println("looking up " + receiver + "." + name);
             return map.get(new CallPair(receiver, name));
         }
 
@@ -250,7 +249,6 @@ public class AstTyper {
         }
 
         Type lookupFieldType(Type type, String name) {
-            System.err.println("looking up " + type + "." + name);
             // TODO look ma, no error handling
             return map.get(type)
                     .variableDeclarations().stream()
