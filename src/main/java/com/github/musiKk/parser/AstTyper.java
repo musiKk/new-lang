@@ -14,6 +14,7 @@ import com.github.musiKk.parser.CompilationUnit.Expression;
 import com.github.musiKk.parser.CompilationUnit.ExpressionStatement;
 import com.github.musiKk.parser.CompilationUnit.FunctionDeclaration;
 import com.github.musiKk.parser.CompilationUnit.FunctionEvaluationExpression;
+import com.github.musiKk.parser.CompilationUnit.FunctionSignature;
 import com.github.musiKk.parser.CompilationUnit.NullExpression;
 import com.github.musiKk.parser.CompilationUnit.NumberExpression;
 import com.github.musiKk.parser.CompilationUnit.Statement;
@@ -169,14 +170,18 @@ public class AstTyper {
                         consumer.accept(fd);
                     }
                 })
+                .map(FunctionDeclaration::signature)
                 .forEach(functionRegistry::registerFunction);
     }
 
-    public static class FunctionRegistry {
+    public void addPrototype(FunctionSignature sig) {
+        functionRegistry.registerFunction(sig);
+    }
+
+    static class FunctionRegistry {
         Map<CallPair, Function> map = new HashMap<>();
 
-        public void registerFunction(FunctionDeclaration fd) {
-            var sig = fd.signature();
+        public void registerFunction(FunctionSignature sig) {
             var callPair = new CallPair(
                 sig.receiver().map(Type::of),
                 sig.name()

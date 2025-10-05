@@ -22,7 +22,6 @@ import com.github.musiKk.parser.CompilationUnit.ExpressionStatement;
 import com.github.musiKk.parser.CompilationUnit.FunctionDeclaration;
 import com.github.musiKk.parser.CompilationUnit.FunctionEvaluationExpression;
 import com.github.musiKk.parser.CompilationUnit.FunctionSignature;
-import com.github.musiKk.parser.CompilationUnit.NativeFunctionDeclaration;
 import com.github.musiKk.parser.CompilationUnit.NumberExpression;
 import com.github.musiKk.parser.CompilationUnit.Statement;
 import com.github.musiKk.parser.CompilationUnit.StringExpression;
@@ -70,21 +69,22 @@ public class Compiler implements ConfigReader.ConfigTarget {
 
         // typer test
         var typer = new AstTyper(cu);
-        typer.getFunctionRegistry().registerFunction(
-            new NativeFunctionDeclaration(new FunctionSignature(
+        // XXX this is a hack; the typer should be able to resolve this on its own
+        typer.addPrototype(
+            new FunctionSignature(
                 Optional.empty(),
                 "print",
                 List.of(new VariableDeclaration("", "String")),
                 "void"
-            ))
+            )
         );
-        typer.getFunctionRegistry().registerFunction(
-            new NativeFunctionDeclaration(new FunctionSignature(
+        typer.addPrototype(
+            new FunctionSignature(
                 Optional.of("Int"),
                 "toString",
                 Collections.emptyList(),
                 "String"
-            ))
+            )
         );
         var tcu = typer.resolveTypes();
         System.err.println(tcu);
