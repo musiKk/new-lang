@@ -84,7 +84,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
                 Optional.empty(),
                 "print",
                 List.of(new VariableDeclaration("", "String")),
-                "void"
+                "Void"
             )
         );
         typer.addPrototype(
@@ -519,7 +519,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
     class FunctionNameMapper {
         final Map<String, String> map = new HashMap<>();
         String getCName(Optional<Type> target, String name) {
-            var candName = target.map(t -> t.name() + "_").orElse("") + name;
+            var candName = target.map(t -> t.name() + "__").orElse("") + name;
             if (map.containsKey(candName)) {
                 return map.get(candName);
             }

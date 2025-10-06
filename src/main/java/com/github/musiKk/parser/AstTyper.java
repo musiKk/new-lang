@@ -104,7 +104,7 @@ public class AstTyper {
 
     private TExpression typeExpression(Expression expression, Scope scope) {
         return switch (expression) {
-            case NullExpression ne -> new TNullExpression();
+            case NullExpression _ -> new TNullExpression();
             case NumberExpression ne -> new TNumberExpression(ne.number());
             case StringExpression se -> new TStringExpression(se.string());
             case VariableExpression ve -> typeVariableExpression(ve, scope);
