@@ -36,7 +36,9 @@ import com.github.musiKk.parser.Type;
 import lombok.AllArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
-import lombok.ToString;class Compiler implements ConfigReader.ConfigTarget {
+import lombok.ToString;
+
+public class Compiler implements ConfigReader.ConfigTarget {
 
     @Setter
     private List<String> lookupPath = new ArrayList<>();
@@ -130,7 +132,7 @@ import lombok.ToString;class Compiler implements ConfigReader.ConfigTarget {
                     switch (stmt) {
                         case TDataDefinition dd -> statementCollection.dds.add(dd);
                         case TUserFunctionDeclaration ufd -> statementCollection.ufds.add(ufd);
-                        case TNativeFunctionDeclaration __ -> {}
+                        case TNativeFunctionDeclaration _ -> {}
                         default -> statementCollection.stmts.add(stmt);
                     }
                 });
@@ -517,7 +519,7 @@ import lombok.ToString;class Compiler implements ConfigReader.ConfigTarget {
     class FunctionNameMapper {
         final Map<String, String> map = new HashMap<>();
         String getCName(Optional<Type> target, String name) {
-            var candName = target.map(t -> t.name() + "__").orElse("") + name;
+            var candName = target.map(t -> t.name() + "_").orElse("") + name;
             if (map.containsKey(candName)) {
                 return map.get(candName);
             }

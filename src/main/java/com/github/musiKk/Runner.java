@@ -100,7 +100,7 @@ public class Runner implements ConfigReader.ConfigTarget {
             case NumberExpression ne -> new NumberValue(ne.number());
             case StringExpression se -> new StringValue(se.string());
             case BooleanExpression be -> be.value() ? True : False;
-            case NullExpression __ -> Null;
+            case NullExpression _ -> Null;
             case VariableExpression ve -> {
                 yield ve.target()
                     .map(target -> evaluateExpression(target, frame))
@@ -333,7 +333,7 @@ public class Runner implements ConfigReader.ConfigTarget {
         optTarget.map(target -> {
             return switch (target) {
                 case DataTarget dt -> dt.data;
-                case UfcsTarget __ -> evaluateExpression(fe.arguments().get(0), frame);
+                case UfcsTarget _ -> evaluateExpression(fe.arguments().get(0), frame);
                 default -> null;
             };
         }).ifPresent(target -> {
@@ -362,7 +362,7 @@ public class Runner implements ConfigReader.ConfigTarget {
                     if (scopedVariable.variable.value instanceof TraitValue traitValue) {
                         var traitDefinition = traitValue.traitDefinition;
                         // passedTraits.put(parameter.typeName.get(), traitDefinition);
-                        passedTraits.computeIfAbsent(parameter.typeName.get(), __ -> new HashMap<>())
+                        passedTraits.computeIfAbsent(parameter.typeName.get(), _ -> new HashMap<>())
                                 .put(dataType.name(), traitDefinition);
                     }
                 } catch (SymbolNotFoundException e) {
@@ -491,7 +491,7 @@ public class Runner implements ConfigReader.ConfigTarget {
         processingResult.dataDefinitions().forEach((name, dataDefinition) -> {
             processDataDefinition(dataDefinition, frame.scope);
         });
-        processingResult.functionDeclarations().forEach((__, functionDeclaration) -> {
+        processingResult.functionDeclarations().forEach((_, functionDeclaration) -> {
             registerFunction(functionDeclaration, frame.scope, moduleName);
         });
         processingResult.variableDeclarations().forEach((name, variableDeclaration) -> {

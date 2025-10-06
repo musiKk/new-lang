@@ -24,7 +24,7 @@ public class Tokenizer {
 
         patterns.sort(Comparator.comparingInt(
             p -> switch (p) {
-                case CommentPattern __ -> Integer.MAX_VALUE;
+                case CommentPattern _ -> Integer.MAX_VALUE;
                 case StaticPattern sp -> sp.pattern.length();
                 default -> Integer.MIN_VALUE;
             }).reversed());

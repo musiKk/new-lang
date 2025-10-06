@@ -22,7 +22,7 @@ public class Io {
     }
     public static String stringify(Value value) {
         return switch (value) {
-            case NullValue __ -> "null";
+            case NullValue _ -> "null";
             case NumberValue nv -> String.valueOf(nv.number());
             case BooleanValue bv -> String.valueOf(bv.value());
             case StringValue sv -> sv.string();
