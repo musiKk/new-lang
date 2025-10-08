@@ -261,7 +261,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
                 if (!(returnStatement instanceof TExpressionStatement)) {
                     throw new RuntimeException("last statement in block must be an expression: " + be);
                 }
-                for (int i = 0; i <= stmts.size() - 1; i++) {
+                for (int i = 0; i < stmts.size() - 1; i++) {
                     var stmt = stmts.get(i);
                     compileStatement(stmt, locals, fb);
                 }
