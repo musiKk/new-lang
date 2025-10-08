@@ -39,4 +39,6 @@ String Int__toString(int i) {
     return String__native_new(buf);
 }
 
+#define Void void*
+
 #endif

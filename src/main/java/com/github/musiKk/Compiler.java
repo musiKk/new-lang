@@ -12,6 +12,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import com.github.musiKk.Compiler.Output.SimpleStatementCollector;
+import com.github.musiKk.Compiler.Output.StatementCollector;
 import com.github.musiKk.parser.AstTyper;
 import com.github.musiKk.parser.CompilationUnit;
 import com.github.musiKk.parser.CompilationUnit.FunctionSignature;
@@ -24,6 +26,7 @@ import com.github.musiKk.parser.TCompilationUnit.TDataDefinition;
 import com.github.musiKk.parser.TCompilationUnit.TExpression;
 import com.github.musiKk.parser.TCompilationUnit.TExpressionStatement;
 import com.github.musiKk.parser.TCompilationUnit.TFunctionEvaluationExpression;
+import com.github.musiKk.parser.TCompilationUnit.TIfExpression;
 import com.github.musiKk.parser.TCompilationUnit.TNativeFunctionDeclaration;
 import com.github.musiKk.parser.TCompilationUnit.TNumberExpression;
 import com.github.musiKk.parser.TCompilationUnit.TStatement;
@@ -51,7 +54,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
     public static void main(String[] args) {
         var compiler = new Compiler();
         ConfigReader.readConfig().applyConfig(compiler);
-        compiler.compileProgram("test.tst");
+        compiler.compileProgram("if-test.tst");
     }
 
     /**
@@ -215,7 +218,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
         }
     }
 
-    private void compileStatement(TStatement statement, Scope locals, Output.FunctionBuilder fb) {
+    private void compileStatement(TStatement statement, Scope locals, StatementCollector fb) {
         switch (statement) {
             case TExpressionStatement es -> fb.addElement(compileExpression(es.expression(), locals, fb));
             case TVariableDeclaration vd -> {
@@ -228,7 +231,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
         }
     }
 
-    private Output.Expression compileExpression(TExpression parsedExpression, Scope locals, Output.FunctionBuilder fb) {
+    private Output.Expression compileExpression(TExpression parsedExpression, Scope locals, StatementCollector fb) {
         return switch (parsedExpression) {
             case TNumberExpression(long n) -> new Output.NumberExpression(n);
             case TStringExpression se -> {
@@ -290,6 +293,23 @@ public class Compiler implements ConfigReader.ConfigTarget {
 
                 yield new Output.FunctionEvaluation(fName, args);
             }
+            case TIfExpression ie -> {
+                var resultVarName = locals.newTemp(typeNameMapper.getCName(ie.type()));
+                fb.addElement(new Output.VariableDeclaration(resultVarName, typeNameMapper.getCName(ie.type())));
+                var condResult = compileExpression(ie.condition(), locals, fb);
+
+                var thenCollector = new SimpleStatementCollector();
+                var thenExpression = compileExpression(ie.thenBranch(), locals, thenCollector);
+                thenCollector.addElement(new Output.Assignment(resultVarName, thenExpression));
+
+                var elseCollector = new SimpleStatementCollector();
+                var elseExpression = ie.elseBranch().map(e -> compileExpression(e, locals, elseCollector));
+                // XXX this does not work for primitive types
+                elseCollector.elements.add(new Output.Assignment(resultVarName, elseExpression.orElse(new Output.Null())));
+
+                fb.addElement(new Output.If(condResult, thenCollector.elements, elseCollector.elements));
+                yield new Output.NameExpression(resultVarName);
+            }
             default -> throw new RuntimeException(parsedExpression.toString());
         };
     }
@@ -316,8 +336,22 @@ public class Compiler implements ConfigReader.ConfigTarget {
         record Function(String cName, String returnType, List<Parameter> parameters, List<Output.Element> body) {};
         record Parameter(String name, String type) {};
 
+        interface StatementCollector {
+            void addElement(Output.Element e);
+        }
+
+        static class SimpleStatementCollector implements StatementCollector {
+            private final List<Element> elements = new ArrayList<>();
+
+            @Override
+            public void addElement(Element e) {
+                elements.add(e);
+            }
+
+        }
+
         @RequiredArgsConstructor
-        class FunctionBuilder {
+        class FunctionBuilder implements StatementCollector {
             final String cName;
             final String returnType;
             final List<Parameter> parameters = new ArrayList<>();
@@ -325,7 +359,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
             void parameter(String name, String type) {
                 parameters.add(new Parameter(name, type));
             }
-            void addElement(Output.Element e) {
+            public void addElement(Output.Element e) {
                 body.add(e);
             }
             void finish() {
@@ -353,12 +387,14 @@ public class Compiler implements ConfigReader.ConfigTarget {
         interface Statement extends Element {}
         record NumberExpression(long l) implements Expression {}
         record StringLiteral(String s) implements Expression {}
+        record Null() implements Expression {}
         record NameExpression(String name) implements Expression {}
         record BinaryExpression(Expression left, String op, Expression right) implements Expression {}
         record Block(List<Expression> expressions) implements Expression {}
         record FieldAccess(Expression target, String field) implements Expression {}
         record Allocation(String type) implements Expression {}
         record FunctionEvaluation(String name, List<Expression> arguments) implements Expression {}
+        record If(Expression condition, List<Element> thens, List<Element> elses) implements Expression {}
 
         record VariableDeclaration(String name, String type) implements Statement {}
         record Assignment(String name, Expression right) implements Statement {}
@@ -407,11 +443,12 @@ public class Compiler implements ConfigReader.ConfigTarget {
             emitLineNl("}", true);
         }
 
-        void emitExpression(Output.Element e, boolean doIndent) {
-            switch (e) {
+        void emitExpression(Output.Element element, boolean doIndent) {
+            switch (element) {
                 case Output.NumberExpression n -> emitLine(Long.toString(n.l), doIndent);
                 case Output.StringLiteral s -> emitLine("\""  + s.s + "\"", doIndent);
                 case Output.NameExpression n -> emitLine(n.name, doIndent);
+                case Output.Null _ -> emitLine("NULL", doIndent);
                 case Output.VariableDeclaration vd -> {
                     emitLine(vd.type + " " + vd.name, true);
                 }
@@ -450,7 +487,28 @@ public class Compiler implements ConfigReader.ConfigTarget {
                     if (argc > 0) emitExpression(fe.arguments.getLast(), false);
                     emit(")");
                 }
-                default -> throw new RuntimeException("not implemented: " + e);
+                case Output.If _if -> {
+                    emitLine("if(", doIndent);
+                    emitExpression(_if.condition, false);
+                    emitLineNl(") {", false);
+                    indent();
+                    _if.thens.stream()
+                            .forEach(t -> {
+                                emitExpression(t, doIndent);
+                                emitLineNl(";", false);
+                            });
+                    outdent();
+                    emitLineNl("} else {", doIndent);
+                    indent();
+                    _if.elses.stream()
+                            .forEach(e -> {
+                                emitExpression(e, doIndent);
+                                emitLineNl(";", false);
+                            });
+                    outdent();
+                    emitLineNl("}", doIndent);
+                }
+                default -> throw new RuntimeException("not implemented: " + element);
             }
         }
 

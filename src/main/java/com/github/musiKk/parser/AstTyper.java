@@ -5,7 +5,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
+import com.github.musiKk.Tokenizer.TokenType;
 import com.github.musiKk.parser.CompilationUnit.AssignmentExpression;
 import com.github.musiKk.parser.CompilationUnit.BinaryExpression;
 import com.github.musiKk.parser.CompilationUnit.BlockExpression;
@@ -15,6 +17,7 @@ import com.github.musiKk.parser.CompilationUnit.ExpressionStatement;
 import com.github.musiKk.parser.CompilationUnit.FunctionDeclaration;
 import com.github.musiKk.parser.CompilationUnit.FunctionEvaluationExpression;
 import com.github.musiKk.parser.CompilationUnit.FunctionSignature;
+import com.github.musiKk.parser.CompilationUnit.IfExpression;
 import com.github.musiKk.parser.CompilationUnit.NullExpression;
 import com.github.musiKk.parser.CompilationUnit.NumberExpression;
 import com.github.musiKk.parser.CompilationUnit.Statement;
@@ -30,6 +33,7 @@ import com.github.musiKk.parser.TCompilationUnit.TExpression;
 import com.github.musiKk.parser.TCompilationUnit.TExpressionStatement;
 import com.github.musiKk.parser.TCompilationUnit.TFunctionEvaluationExpression;
 import com.github.musiKk.parser.TCompilationUnit.TFunctionSignature;
+import com.github.musiKk.parser.TCompilationUnit.TIfExpression;
 import com.github.musiKk.parser.TCompilationUnit.TNullExpression;
 import com.github.musiKk.parser.TCompilationUnit.TNumberExpression;
 import com.github.musiKk.parser.TCompilationUnit.TStatement;
@@ -142,9 +146,27 @@ public class AstTyper {
             case BinaryExpression be -> {
                 var left = typeExpression(be.left(), scope);
                 var right = typeExpression(be.right(), scope);
+                var operator = be.operator();
+
                 // this crudely assumes that operators result in whatever is on the left
-                // this should carry us for a while
-                yield new TBinaryExpression(left, be.operator(), right, left.type());
+                // for non comparisons. this should carry us for a while
+                var resultType = BOOLEAN_OPERATORS.contains(operator) ? Type.of("Bool") : left.type();
+                yield new TBinaryExpression(left, operator, right, resultType);
+            }
+            case IfExpression ie -> {
+                var condition = typeExpression(ie.condition(), scope);
+                if (condition.type() != Type.of("Bool")) {
+                    throw new RuntimeException("if condition must be of type Bool " + condition);
+                }
+                var thenExpression = typeExpression(ie.thenBranch(), scope);
+                var elseExpression = ie.elseBranch().map(e -> typeExpression(e, scope));
+                var resultType = elseExpression.map(e -> {
+                    if (e.type() != thenExpression.type()) {
+                        return Type.of("Any");
+                    }
+                    return e.type();
+                }).orElse(thenExpression.type());
+                yield new TIfExpression(condition, thenExpression, elseExpression, resultType);
             }
             default -> throw new RuntimeException("unsupported expression " + expression);
         };
@@ -249,6 +271,7 @@ public class AstTyper {
         }
 
         Type lookupFieldType(Type type, String name) {
+            System.err.println("looking up field " + type + "." + name);
             // TODO look ma, no error handling
             return map.get(type)
                     .variableDeclarations().stream()
@@ -280,5 +303,10 @@ public class AstTyper {
             return result;
         }
     }
+
+    private static final Set<TokenType> BOOLEAN_OPERATORS = Set.of(
+            TokenType.EQUALS_EQUALS, TokenType.NOT_EQUALS,
+            TokenType.LT, TokenType.GT, TokenType.LE, TokenType.GE
+    );
 
 }
