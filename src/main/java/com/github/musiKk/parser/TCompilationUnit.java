@@ -18,7 +18,7 @@ public record TCompilationUnit(List<TStatement> statements) {
         public Type type() { return Type.of("Any"); }
     }
     public record TBooleanExpression(boolean value) implements TExpression {
-        public Type type() { return Type.of("Boolean"); }
+        public Type type() { return Type.of("Bool"); }
     }
     public record TAssignmentExpression(TVariableExpression target, TExpression value) implements TExpression {
         public Type type() { return value.type(); }

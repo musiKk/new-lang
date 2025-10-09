@@ -22,6 +22,7 @@ import com.github.musiKk.parser.Parser;
 import com.github.musiKk.parser.TCompilationUnit;
 import com.github.musiKk.parser.TCompilationUnit.TBinaryExpression;
 import com.github.musiKk.parser.TCompilationUnit.TBlockExpression;
+import com.github.musiKk.parser.TCompilationUnit.TBooleanExpression;
 import com.github.musiKk.parser.TCompilationUnit.TDataDefinition;
 import com.github.musiKk.parser.TCompilationUnit.TExpression;
 import com.github.musiKk.parser.TCompilationUnit.TExpressionStatement;
@@ -242,6 +243,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
 
                 yield new Output.NameExpression(stringVarName);
             }
+            case TBooleanExpression be -> new Output.Boolean(be.value());
             case TVariableExpression ve when ve.target().isEmpty() -> {
                 if (!locals.variables.containsKey(ve.name())) {
                     throw new RuntimeException("name " + ve.name() + " not found");
@@ -387,6 +389,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
         interface Statement extends Element {}
         record NumberExpression(long l) implements Expression {}
         record StringLiteral(String s) implements Expression {}
+        record Boolean(boolean b) implements Expression {}
         record Null() implements Expression {}
         record NameExpression(String name) implements Expression {}
         record BinaryExpression(Expression left, String op, Expression right) implements Expression {}
@@ -447,6 +450,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
             switch (element) {
                 case Output.NumberExpression n -> emitLine(Long.toString(n.l), doIndent);
                 case Output.StringLiteral s -> emitLine("\""  + s.s + "\"", doIndent);
+                case Output.Boolean(var b) -> emitLine(Boolean.toString(b), doIndent);
                 case Output.NameExpression n -> emitLine(n.name, doIndent);
                 case Output.Null _ -> emitLine("NULL", doIndent);
                 case Output.VariableDeclaration vd -> {

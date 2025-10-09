@@ -11,6 +11,7 @@ import com.github.musiKk.Tokenizer.TokenType;
 import com.github.musiKk.parser.CompilationUnit.AssignmentExpression;
 import com.github.musiKk.parser.CompilationUnit.BinaryExpression;
 import com.github.musiKk.parser.CompilationUnit.BlockExpression;
+import com.github.musiKk.parser.CompilationUnit.BooleanExpression;
 import com.github.musiKk.parser.CompilationUnit.DataDefinition;
 import com.github.musiKk.parser.CompilationUnit.Expression;
 import com.github.musiKk.parser.CompilationUnit.ExpressionStatement;
@@ -28,6 +29,7 @@ import com.github.musiKk.parser.CompilationUnit.VariableExpression;
 import com.github.musiKk.parser.TCompilationUnit.TAssignmentExpression;
 import com.github.musiKk.parser.TCompilationUnit.TBinaryExpression;
 import com.github.musiKk.parser.TCompilationUnit.TBlockExpression;
+import com.github.musiKk.parser.TCompilationUnit.TBooleanExpression;
 import com.github.musiKk.parser.TCompilationUnit.TDataDefinition;
 import com.github.musiKk.parser.TCompilationUnit.TExpression;
 import com.github.musiKk.parser.TCompilationUnit.TExpressionStatement;
@@ -111,6 +113,7 @@ public class AstTyper {
             case NullExpression _ -> new TNullExpression();
             case NumberExpression ne -> new TNumberExpression(ne.number());
             case StringExpression se -> new TStringExpression(se.string());
+            case BooleanExpression be -> new TBooleanExpression(be.value());
             case VariableExpression ve -> typeVariableExpression(ve, scope);
             case AssignmentExpression ae -> {
                 var target = typeVariableExpression(ae.target(), scope);

@@ -41,4 +41,8 @@ String Int__toString(int i) {
 
 #define Void void*
 
+#define Bool int
+#define true 1
+#define false 0
+
 #endif
