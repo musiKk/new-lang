@@ -5,7 +5,10 @@ import java.util.Optional;
 
 import com.github.musiKk.Tokenizer.TokenType;
 
-public record TCompilationUnit(List<TStatement> statements) {
+public record TCompilationUnit(
+        List<TDataDefinition> dataDefinitions,
+        List<TFunctionDeclaration> functionDeclarations,
+        List<TStatement> statements) {
 
     public sealed interface TStatement {}
     public record TExpressionStatement(TExpression expression) implements TStatement {}
@@ -43,8 +46,6 @@ public record TCompilationUnit(List<TStatement> statements) {
 
     public record TArrayCreationExpression(String typeName, Optional<TExpression> lengthExpression, List<TExpression> initializations, Type type) implements TExpression {}
     public record TArrayLookupExpression(TExpression target, TExpression indexExpression, Type type) implements TExpression {}
-
-    public record TImport(String name) implements TStatement {}
 
     public sealed interface TFunctionDeclaration extends TStatement {
         TFunctionSignature signature();

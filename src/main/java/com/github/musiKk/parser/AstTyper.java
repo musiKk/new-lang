@@ -33,6 +33,7 @@ import com.github.musiKk.parser.TCompilationUnit.TBooleanExpression;
 import com.github.musiKk.parser.TCompilationUnit.TDataDefinition;
 import com.github.musiKk.parser.TCompilationUnit.TExpression;
 import com.github.musiKk.parser.TCompilationUnit.TExpressionStatement;
+import com.github.musiKk.parser.TCompilationUnit.TFunctionDeclaration;
 import com.github.musiKk.parser.TCompilationUnit.TFunctionEvaluationExpression;
 import com.github.musiKk.parser.TCompilationUnit.TFunctionSignature;
 import com.github.musiKk.parser.TCompilationUnit.TIfExpression;
@@ -56,19 +57,39 @@ public class AstTyper {
     private final DataRegistry dataRegistry = new DataRegistry(functionRegistry);
 
     public TCompilationUnit resolveTypes() {
-        collectTypes();
-        collectFunctions();
+        var c = new Object() {
+            List<DataDefinition> dds = new ArrayList<>();
+            List<FunctionDeclaration> fds = new ArrayList<>();
+            List<Statement> stmts = new ArrayList<>();
+        };
+        cu.statements().stream()
+                .forEach(s -> {
+                    switch (s) {
+                        case DataDefinition dd -> c.dds.add(dd);
+                        case FunctionDeclaration fd -> c.fds.add(fd);
+                        default -> c.stmts.add(s);
+                    };
+                });
+        collectTypes(c.dds);
+        collectFunctions(c.fds);
 
         var scope = Scope.EMPTY.newScope();
-        return typeCompilationUnit(cu, scope);
+        var tStmts = typeStatements(c.stmts, scope);
+
+        return new TCompilationUnit(
+                new ArrayList<>(dataRegistry.map.values()),
+                functionRegistry.map.values().stream()
+                        .filter(f -> f.functionDeclaration != null)
+                        .map(FunctionRegistry.Function::functionDeclaration)
+                        .map(f -> typeFunctionDeclaration(f, scope))
+                        .toList(),
+                tStmts);
     }
 
-    private TCompilationUnit typeCompilationUnit(CompilationUnit cu, Scope scope) {
-        return new TCompilationUnit(
-            cu.statements().stream()
+    private List<TStatement> typeStatements(List<Statement> statements, Scope scope) {
+        return statements.stream()
                 .map(s -> typeStatement(s, scope))
-                .toList()
-        );
+                .toList();
     }
 
     private TStatement typeStatement(Statement statement, Scope scope) {
@@ -76,6 +97,12 @@ public class AstTyper {
             case ExpressionStatement es -> new TExpressionStatement(typeExpression(es.expression(), scope));
             case VariableDeclaration vd -> typeVariableDeclaration(vd, scope);
             case DataDefinition dd -> dataRegistry.map.get(Type.of(dd.name()));
+            default -> throw new RuntimeException("unsupported statement " + statement);
+        };
+    }
+
+    private TFunctionDeclaration typeFunctionDeclaration(FunctionDeclaration fd, Scope scope) {
+        return switch (fd) {
             case UserFunctionDeclaration ufd -> {
                 var sig = ufd.signature();
                 var receiverType = sig.receiver().map(Type::of);
@@ -95,7 +122,7 @@ public class AstTyper {
                     body
                 );
             }
-            default -> throw new RuntimeException("unsupported statement " + statement);
+            default -> throw new RuntimeException("not supported " + fd);
         };
     }
 
@@ -188,25 +215,27 @@ public class AstTyper {
         }
     }
 
-    private void collectFunctions() {
-        cu.statements().stream()
-                .<FunctionDeclaration>mapMulti((s, consumer) -> {
-                    if (s instanceof FunctionDeclaration fd) {
-                        consumer.accept(fd);
-                    }
-                })
-                .map(FunctionDeclaration::signature)
+    private void collectFunctions(List<FunctionDeclaration> functionDeclarations) {
+        functionDeclarations.stream()
                 .forEach(functionRegistry::registerFunction);
     }
 
     public void addPrototype(FunctionSignature sig) {
-        functionRegistry.registerFunction(sig);
+        functionRegistry.registerPrototype(sig);
     }
 
     static class FunctionRegistry {
         Map<CallPair, Function> map = new HashMap<>();
 
-        public void registerFunction(FunctionSignature sig) {
+        public void registerPrototype(FunctionSignature sig) {
+            registerFunction(null, sig);
+        }
+
+        public void registerFunction(FunctionDeclaration fd) {
+            registerFunction(fd, fd.signature());
+        }
+
+        private void registerFunction(FunctionDeclaration fd, FunctionSignature sig) {
             var callPair = new CallPair(
                 sig.receiver().map(Type::of),
                 sig.name()
@@ -220,7 +249,8 @@ public class AstTyper {
                     Type.of(sig.returnType()),
                     sig.parameters().stream()
                             .map(p -> new Function.Parameter(p.name(), Type.of(p.type().get())))
-                            .toList());
+                            .toList(),
+                    fd);
             map.put(callPair, function);
         }
 
@@ -234,19 +264,14 @@ public class AstTyper {
                 Optional<Type> receiver,
                 String name,
                 Type type,
-                List<Parameter> parameters) {
+                List<Parameter> parameters,
+                FunctionDeclaration functionDeclaration) {
             record Parameter(String name, Type type) {}
         }
     }
 
-    void collectTypes() {
-        cu.statements().stream()
-                .<DataDefinition>mapMulti((s, consumer) -> {
-                    if (s instanceof DataDefinition dd) {
-                        consumer.accept(dd);
-                    }
-                })
-                .forEach(dataRegistry::register);
+    void collectTypes(List<DataDefinition> dataDefinitions) {
+        dataDefinitions.stream().forEach(dataRegistry::register);
     }
 
     @RequiredArgsConstructor
@@ -270,11 +295,10 @@ public class AstTyper {
 
             functionRegistry.map.put(
                     new FunctionRegistry.CallPair(Optional.empty(), name),
-                    new FunctionRegistry.Function(Optional.empty(),name, Type.of(name), varDecls.stream().map(vd -> new FunctionRegistry.Function.Parameter(vd.name(), vd.type())).toList()));
+                    new FunctionRegistry.Function(Optional.empty(),name, Type.of(name), varDecls.stream().map(vd -> new FunctionRegistry.Function.Parameter(vd.name(), vd.type())).toList(), null));
         }
 
         Type lookupFieldType(Type type, String name) {
-            System.err.println("looking up field " + type + "." + name);
             // TODO look ma, no error handling
             return map.get(type)
                     .variableDeclarations().stream()

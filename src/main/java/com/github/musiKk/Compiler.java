@@ -26,9 +26,9 @@ import com.github.musiKk.parser.TCompilationUnit.TBooleanExpression;
 import com.github.musiKk.parser.TCompilationUnit.TDataDefinition;
 import com.github.musiKk.parser.TCompilationUnit.TExpression;
 import com.github.musiKk.parser.TCompilationUnit.TExpressionStatement;
+import com.github.musiKk.parser.TCompilationUnit.TFunctionDeclaration;
 import com.github.musiKk.parser.TCompilationUnit.TFunctionEvaluationExpression;
 import com.github.musiKk.parser.TCompilationUnit.TIfExpression;
-import com.github.musiKk.parser.TCompilationUnit.TNativeFunctionDeclaration;
 import com.github.musiKk.parser.TCompilationUnit.TNumberExpression;
 import com.github.musiKk.parser.TCompilationUnit.TStatement;
 import com.github.musiKk.parser.TCompilationUnit.TStringExpression;
@@ -55,7 +55,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
     public static void main(String[] args) {
         var compiler = new Compiler();
         ConfigReader.readConfig().applyConfig(compiler);
-        compiler.compileProgram("if-test.tst");
+        compiler.compileProgram("test.tst");
     }
 
     /**
@@ -125,28 +125,12 @@ public class Compiler implements ConfigReader.ConfigTarget {
     }
 
     private void compileCompilationUnit(TCompilationUnit cu, Output output) {
-        var statementCollection = new Object() {
-            List<TDataDefinition> dds = new ArrayList<>();
-            List<TUserFunctionDeclaration> ufds = new ArrayList<>();
-            List<TStatement> stmts = new ArrayList<>();
-        };
-
-        cu.statements().stream()
-                .forEach(stmt -> {
-                    switch (stmt) {
-                        case TDataDefinition dd -> statementCollection.dds.add(dd);
-                        case TUserFunctionDeclaration ufd -> statementCollection.ufds.add(ufd);
-                        case TNativeFunctionDeclaration _ -> {}
-                        default -> statementCollection.stmts.add(stmt);
-                    }
-                });
-
-        statementCollection.dds.stream()
+        cu.dataDefinitions().stream()
                 .forEach(dd -> compileType(dd, output));
-        statementCollection.ufds.stream()
+        cu.functionDeclarations().stream()
                 .forEach(ufd -> compileFunctionDefinition(ufd, output));
 
-        compileMain(statementCollection.stmts, output);
+        compileMain(cu.statements(), output);
     }
 
     private void compileMain(List<TStatement> statements, Output output) {
@@ -185,8 +169,8 @@ public class Compiler implements ConfigReader.ConfigTarget {
         functionNameMapper.add(typeCName, typeCName + "__new");
     }
 
-    private void compileFunctionDefinition(TUserFunctionDeclaration ufd, Output output) {
-        var signature = ufd.signature();
+    private void compileFunctionDefinition(TFunctionDeclaration fd, Output output) {
+        var signature = fd.signature();
 
         var functionName = functionNameMapper.getCName(signature.receiver(), signature.name());
         var function = output.function(functionName, typeNameMapper.getCName(signature.returnType()));
@@ -197,8 +181,10 @@ public class Compiler implements ConfigReader.ConfigTarget {
                     scope.variables.put(p.name(), typeNameMapper.getCName(p.type()));
                 });
 
-        var result = compileExpression(ufd.body(), scope, function);
-        function.addElement(new Output.Return(result));
+        if (fd instanceof TUserFunctionDeclaration ufd) {
+            var result = compileExpression(ufd.body(), scope, function);
+            function.addElement(new Output.Return(result));
+        }
         function.finish();
     }
 
