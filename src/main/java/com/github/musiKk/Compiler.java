@@ -63,25 +63,32 @@ public class Compiler implements ConfigReader.ConfigTarget {
      * @param pathString
      */
     public void compileProgram(String pathString) {
-        Path.of(target).toFile().mkdirs();
-        var resolvedPath = resolvePath(pathString);
 
-        // TODO we only parse the main file for now
-        var cu = parseCompilationUnit(resolvedPath);
-        var tcu = typeCompilationUnit(cu);
+        var typer = makeTyper();
+        var tcu = typer.typeProgram(pathString);
 
         var output = new Output();
         compileCompilationUnit(tcu, output);
 
         try {
+            var resolvedPath = resolvePath(pathString);
+            Path.of(target).toFile().mkdirs();
             output.emit(Path.of(target, resolvedPath.getFileName().toString().replace(".tst", ".c")));
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
 
-    private TCompilationUnit typeCompilationUnit(CompilationUnit cu) {
-        var typer = new AstTyper(cu);
+    private AstTyper makeTyper() {
+        var cuLoader = new AstTyper.CompilationUnitLoader() {
+            @Override
+            public CompilationUnit load(String name) {
+                var resolvedPath = resolvePath(name);
+                return parseCompilationUnit(resolvedPath);
+            }
+
+        };
+        var typer = new AstTyper(cuLoader);
         // XXX this is a hack; the typer should be able to resolve this on its own
         typer.addPrototype(
             new FunctionSignature(
@@ -99,7 +106,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
                 "String"
             )
         );
-        return typer.resolveTypes();
+        return typer;
     }
 
     private CompilationUnit parseCompilationUnit(Path resolvedPath) {

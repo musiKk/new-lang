@@ -50,13 +50,14 @@ import lombok.RequiredArgsConstructor;
 
 @RequiredArgsConstructor
 public class AstTyper {
-    private final CompilationUnit cu;
+    private final CompilationUnitLoader cuLoader;
 
     @Getter
     private final FunctionRegistry functionRegistry = new FunctionRegistry();
     private final DataRegistry dataRegistry = new DataRegistry(functionRegistry);
 
-    public TCompilationUnit resolveTypes() {
+    public TCompilationUnit typeProgram(String name) {
+        var cu = cuLoader.load(name);
         var c = new Object() {
             List<DataDefinition> dds = new ArrayList<>();
             List<FunctionDeclaration> fds = new ArrayList<>();
@@ -335,5 +336,9 @@ public class AstTyper {
             TokenType.EQUALS_EQUALS, TokenType.NOT_EQUALS,
             TokenType.LT, TokenType.GT, TokenType.LE, TokenType.GE
     );
+
+    public static interface CompilationUnitLoader {
+        CompilationUnit load(String name);
+    }
 
 }
