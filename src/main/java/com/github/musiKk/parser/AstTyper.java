@@ -46,14 +46,12 @@ import com.github.musiKk.parser.TCompilationUnit.TUserFunctionDeclaration;
 import com.github.musiKk.parser.TCompilationUnit.TVariableDeclaration;
 import com.github.musiKk.parser.TCompilationUnit.TVariableExpression;
 
-import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
 @RequiredArgsConstructor
 public class AstTyper {
     private final CompilationUnitLoader cuLoader;
 
-    @Getter
     private final FunctionRegistry functionRegistry = new FunctionRegistry();
     private final DataRegistry dataRegistry = new DataRegistry(functionRegistry);
 
@@ -316,9 +314,9 @@ public class AstTyper {
             Type dataType = Type.of(scope.module, name);
             map.put(dataType, new TDataDefinition(name, varDecls, Type.of(scope.module, name)));
 
-            functionRegistry.map.put(
-                    new FunctionRegistry.CallPair(scope.module, Optional.empty(), name),
-                    new FunctionRegistry.Function(Optional.empty(),name, dataType, varDecls.stream().map(vd -> new FunctionRegistry.Function.Parameter(vd.name(), vd.type())).toList(), null));
+            functionRegistry.registerPrototype(new FunctionSignature(
+                Optional.empty(), name, dd.variableDeclarations(), name
+            ), scope);
         }
 
         Type lookupFieldType(Type type, String name) {
