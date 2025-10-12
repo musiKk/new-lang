@@ -18,10 +18,10 @@ public record TCompilationUnit(
     }
 
     public record TNullExpression() implements TExpression {
-        public Type type() { return Type.of("Any"); }
+        public Type type() { return Type.Builtin.ANY; }
     }
     public record TBooleanExpression(boolean value) implements TExpression {
-        public Type type() { return Type.of("Bool"); }
+        public Type type() { return Type.Builtin.BOOL; }
     }
     public record TAssignmentExpression(TVariableExpression target, TExpression value) implements TExpression {
         public Type type() { return value.type(); }
@@ -31,10 +31,10 @@ public record TCompilationUnit(
     }
     public record TBlockExpression(List<TStatement> statements, Type type) implements TExpression {}
     public record TNumberExpression(long number) implements TExpression {
-        public Type type() { return Type.of("Int"); }
+        public Type type() { return Type.Builtin.INT; }
     }
     public record TStringExpression(String string) implements TExpression {
-        public Type type() { return Type.of("String"); }
+        public Type type() { return Type.Builtin.STRING; }
     }
     public record TVariableExpression(Optional<TExpression> target, String name, Type type) implements TExpression {}
     public record TBinaryExpression(TExpression left, TokenType operator, TExpression right, Type type) implements TExpression {}
@@ -57,6 +57,6 @@ public record TCompilationUnit(
 
     public record TVariableDeclaration(String name, Type type, Optional<TExpression> initializer) implements TStatement {}
 
-    public record TDataDefinition(String name, List<TVariableDeclaration> variableDeclarations) implements TStatement {}
+    public record TDataDefinition(String name, List<TVariableDeclaration> variableDeclarations, Type type) implements TStatement {}
     public record TTraitImplementation(String typeName, String traitName, List<TFunctionDeclaration> functionDeclarations) implements TStatement {}
 }

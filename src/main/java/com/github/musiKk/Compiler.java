@@ -6,7 +6,6 @@ import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,8 +15,6 @@ import com.github.musiKk.Compiler.Output.SimpleStatementCollector;
 import com.github.musiKk.Compiler.Output.StatementCollector;
 import com.github.musiKk.parser.AstTyper;
 import com.github.musiKk.parser.CompilationUnit;
-import com.github.musiKk.parser.CompilationUnit.FunctionSignature;
-import com.github.musiKk.parser.CompilationUnit.VariableDeclaration;
 import com.github.musiKk.parser.Parser;
 import com.github.musiKk.parser.TCompilationUnit;
 import com.github.musiKk.parser.TCompilationUnit.TBinaryExpression;
@@ -55,25 +52,23 @@ public class Compiler implements ConfigReader.ConfigTarget {
     public static void main(String[] args) {
         var compiler = new Compiler();
         ConfigReader.readConfig().applyConfig(compiler);
-        compiler.compileProgram("test.tst");
+        compiler.compileProgram("test");
     }
 
     /**
      * Compiles an executable starting at {@code pathString}.
      * @param pathString
      */
-    public void compileProgram(String pathString) {
-
+    public void compileProgram(String moduleName) {
         var typer = makeTyper();
-        var tcu = typer.typeProgram(pathString);
+        var tcu = typer.typeProgram(moduleName);
 
         var output = new Output();
         compileCompilationUnit(tcu, output);
 
         try {
-            var resolvedPath = resolvePath(pathString);
             Path.of(target).toFile().mkdirs();
-            output.emit(Path.of(target, resolvedPath.getFileName().toString().replace(".tst", ".c")));
+            output.emit(Path.of(target, moduleName + ".c"));
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -83,30 +78,12 @@ public class Compiler implements ConfigReader.ConfigTarget {
         var cuLoader = new AstTyper.CompilationUnitLoader() {
             @Override
             public CompilationUnit load(String name) {
-                var resolvedPath = resolvePath(name);
+                var resolvedPath = resolvePath(name + ".tst");
                 return parseCompilationUnit(resolvedPath);
             }
 
         };
-        var typer = new AstTyper(cuLoader);
-        // XXX this is a hack; the typer should be able to resolve this on its own
-        typer.addPrototype(
-            new FunctionSignature(
-                Optional.empty(),
-                "print",
-                List.of(new VariableDeclaration("", "String")),
-                "Void"
-            )
-        );
-        typer.addPrototype(
-            new FunctionSignature(
-                Optional.of("Int"),
-                "toString",
-                Collections.emptyList(),
-                "String"
-            )
-        );
-        return typer;
+        return new AstTyper(cuLoader);
     }
 
     private CompilationUnit parseCompilationUnit(Path resolvedPath) {
@@ -150,7 +127,7 @@ public class Compiler implements ConfigReader.ConfigTarget {
     }
 
     private void compileType(TDataDefinition dd, Output output) {
-        var typeCName = typeNameMapper.getCName(Type.of(dd.name()));
+        var typeCName = typeNameMapper.getCName(dd.type());
 
         var struct = output.struct(typeCName);
         dd.variableDeclarations().stream()

@@ -19,6 +19,7 @@ import com.github.musiKk.parser.CompilationUnit.FunctionDeclaration;
 import com.github.musiKk.parser.CompilationUnit.FunctionEvaluationExpression;
 import com.github.musiKk.parser.CompilationUnit.FunctionSignature;
 import com.github.musiKk.parser.CompilationUnit.IfExpression;
+import com.github.musiKk.parser.CompilationUnit.Import;
 import com.github.musiKk.parser.CompilationUnit.NullExpression;
 import com.github.musiKk.parser.CompilationUnit.NumberExpression;
 import com.github.musiKk.parser.CompilationUnit.Statement;
@@ -71,10 +72,11 @@ public class AstTyper {
                         default -> c.stmts.add(s);
                     };
                 });
-        collectTypes(c.dds);
-        collectFunctions(c.fds);
 
-        var scope = Scope.EMPTY.newScope();
+        var scope = Scope.empty(name).newScope();
+        collectTypes(c.dds, scope);
+        collectFunctions(c.fds, scope);
+
         var tStmts = typeStatements(c.stmts, scope);
 
         return new TCompilationUnit(
@@ -97,42 +99,47 @@ public class AstTyper {
         return switch (statement) {
             case ExpressionStatement es -> new TExpressionStatement(typeExpression(es.expression(), scope));
             case VariableDeclaration vd -> typeVariableDeclaration(vd, scope);
-            case DataDefinition dd -> dataRegistry.map.get(Type.of(dd.name()));
+            case DataDefinition dd -> dataRegistry.map.get(scope.lookupType(dd.name()));
+            case Import(var name) -> {
+                // 1. check if name is already loaded
+                // 2. if not, load which will populate the function and data registry
+                // 3. add the module to the scope so that its names are available for lookup
+                yield null;
+            }
             default -> throw new RuntimeException("unsupported statement " + statement);
         };
     }
 
-    private TFunctionDeclaration typeFunctionDeclaration(FunctionDeclaration fd, Scope scope) {
-        return switch (fd) {
-            case UserFunctionDeclaration ufd -> {
-                var sig = ufd.signature();
-                var receiverType = sig.receiver().map(Type::of);
-                var name = sig.name();
-                List<TVariableDeclaration> params = new ArrayList<>();
-                receiverType.ifPresent(t -> {
-                    params.add(new TVariableDeclaration("self", t, Optional.empty()));
-                });
-                sig.parameters().stream()
-                        .forEach(p -> params.add(typeVariableDeclaration(p, scope)));
-                var returnType = Type.of(sig.returnType());
-                var functionScope = scope.newScope();
-                params.stream().forEach(p -> functionScope.vars.put(p.name(), p.type()));
-                var body = typeExpression(ufd.body(), functionScope);
-                yield new TUserFunctionDeclaration(
-                    new TFunctionSignature(receiverType, name, params, returnType),
-                    body
-                );
-            }
-            default -> throw new RuntimeException("not supported " + fd);
-        };
+    private TFunctionDeclaration typeFunctionDeclaration(UserFunctionDeclaration ufd, Scope scope) {
+        var sig = ufd.signature();
+        var receiverType = sig.receiver().map(scope::lookupType);
+        var name = sig.name();
+        List<TVariableDeclaration> params = new ArrayList<>();
+        receiverType.ifPresent(t -> {
+            params.add(new TVariableDeclaration("self", t, Optional.empty()));
+        });
+        sig.parameters().stream()
+                .forEach(p -> params.add(typeVariableDeclaration(p, scope)));
+        var returnType = scope.lookupType(sig.returnType());
+        var functionScope = scope.newScope();
+        params.stream().forEach(p -> functionScope.put(p.name(), p.type()));
+        var body = typeExpression(ufd.body(), functionScope);
+        return new TUserFunctionDeclaration(
+            new TFunctionSignature(receiverType, name, params, returnType),
+            body
+        );
     }
 
     private TVariableDeclaration typeVariableDeclaration(VariableDeclaration vd, Scope scope) {
         var initializer = vd.initializer().map(i -> typeExpression(i, scope));
-        var type = Type.of(vd.type().get());
-        // TODO missing type compatibility check
+        var type = scope.lookupType(vd.type().get());
+        initializer.ifPresent(i -> {
+            if (i.type() != type) {
+                throw new RuntimeException("incompatible types " + i.type() + " <-> " + type);
+            }
+        });
         var name = vd.name();
-        scope.vars.put(name, type);
+        scope.put(name, type);
         return new TVariableDeclaration(name, type, initializer);
     }
 
@@ -171,7 +178,7 @@ public class AstTyper {
                 var arguments = fee.arguments().stream()
                         .map(a -> typeExpression(a, scope))
                         .toList();
-                var type = functionRegistry.lookup(targetType, name).type;
+                var type = functionRegistry.lookup(scope.module, targetType, name).type;
                 yield new TFunctionEvaluationExpression(target, name, arguments, type);
             }
             case BinaryExpression be -> {
@@ -181,19 +188,19 @@ public class AstTyper {
 
                 // this crudely assumes that operators result in whatever is on the left
                 // for non comparisons. this should carry us for a while
-                var resultType = BOOLEAN_OPERATORS.contains(operator) ? Type.of("Bool") : left.type();
+                var resultType = BOOLEAN_OPERATORS.contains(operator) ? Type.Builtin.BOOL : left.type();
                 yield new TBinaryExpression(left, operator, right, resultType);
             }
             case IfExpression ie -> {
                 var condition = typeExpression(ie.condition(), scope);
-                if (condition.type() != Type.of("Bool")) {
+                if (condition.type() != Type.Builtin.BOOL) {
                     throw new RuntimeException("if condition must be of type Bool " + condition);
                 }
                 var thenExpression = typeExpression(ie.thenBranch(), scope);
                 var elseExpression = ie.elseBranch().map(e -> typeExpression(e, scope));
                 var resultType = elseExpression.map(e -> {
                     if (e.type() != thenExpression.type()) {
-                        return Type.of("Any");
+                        return Type.Builtin.ANY;
                     }
                     return e.type();
                 }).orElse(thenExpression.type());
@@ -216,63 +223,77 @@ public class AstTyper {
         }
     }
 
-    private void collectFunctions(List<FunctionDeclaration> functionDeclarations) {
+    private void collectFunctions(List<FunctionDeclaration> functionDeclarations, Scope scope) {
         functionDeclarations.stream()
-                .forEach(functionRegistry::registerFunction);
+                .forEach(fd -> functionRegistry.registerFunction(fd, scope));
     }
 
-    public void addPrototype(FunctionSignature sig) {
-        functionRegistry.registerPrototype(sig);
+    public void addPrototype(FunctionSignature sig, Scope scope) {
+        functionRegistry.registerPrototype(sig, scope);
     }
 
     static class FunctionRegistry {
         Map<CallPair, Function> map = new HashMap<>();
 
-        public void registerPrototype(FunctionSignature sig) {
-            registerFunction(null, sig);
+        public void registerPrototype(FunctionSignature sig, Scope scope) {
+            registerFunction(null, sig, scope);
         }
 
-        public void registerFunction(FunctionDeclaration fd) {
-            registerFunction(fd, fd.signature());
+        public void registerFunction(FunctionDeclaration fd, Scope scope) {
+            registerFunction(fd, fd.signature(), scope);
         }
 
-        private void registerFunction(FunctionDeclaration fd, FunctionSignature sig) {
+        private void registerFunction(FunctionDeclaration fd, FunctionSignature sig, Scope scope) {
+            var receiverType = sig.receiver().map(scope::lookupType);
+
             var callPair = new CallPair(
-                sig.receiver().map(Type::of),
+                scope.module,
+                receiverType,
                 sig.name()
             );
             if (map.containsKey(callPair)) {
                 throw new RuntimeException("function " + callPair + " already defined");
             }
+
+            UserFunctionDeclaration ufd = null;
+            if (fd instanceof UserFunctionDeclaration) {
+                ufd = (UserFunctionDeclaration) fd;
+            }
+
             var function = new Function(
-                    sig.receiver().map(Type::of),
+                    sig.receiver().map(scope::lookupType),
                     sig.name(),
-                    Type.of(sig.returnType()),
+                    scope.lookupType(sig.returnType()),
                     sig.parameters().stream()
-                            .map(p -> new Function.Parameter(p.name(), Type.of(p.type().get())))
+                            .map(p -> new Function.Parameter(p.name(), scope.lookupType(p.type().get())))
                             .toList(),
-                    fd);
+                    ufd);
             map.put(callPair, function);
         }
 
-        Function lookup(Optional<Type> receiver, String name) {
-            return map.get(new CallPair(receiver, name));
+        Function lookup(String module, Optional<Type> receiver, String name) {
+            return map.get(new CallPair(module, receiver, name));
         }
 
-        private record CallPair(Optional<Type> receiver, String name) {}
+        private record CallPair(String module, Optional<Type> receiver, String name) {}
 
         record Function(
                 Optional<Type> receiver,
                 String name,
                 Type type,
                 List<Parameter> parameters,
-                FunctionDeclaration functionDeclaration) {
+                UserFunctionDeclaration functionDeclaration) {
             record Parameter(String name, Type type) {}
         }
     }
 
-    void collectTypes(List<DataDefinition> dataDefinitions) {
-        dataDefinitions.stream().forEach(dataRegistry::register);
+    void collectTypes(List<DataDefinition> dataDefinitions, Scope scope) {
+        dataDefinitions.stream().forEach(dd -> {
+            var name = dd.name();
+            var dataType = Type.of(scope.module, name);
+            scope.put(name, dataType);
+        });
+        dataDefinitions.stream().forEach(dd -> dataRegistry.register(dd, scope));
     }
 
     @RequiredArgsConstructor
@@ -280,23 +301,24 @@ public class AstTyper {
         final FunctionRegistry functionRegistry;
         final Map<Type, TDataDefinition> map = new HashMap<>();
 
-        void register(DataDefinition dd) {
+        void register(DataDefinition dd, Scope scope) {
             var name = dd.name();
             var varDecls = dd.variableDeclarations().stream()
                     .map(vd -> new TVariableDeclaration(
                             vd.name(),
-                            Type.of(vd.type().get()),
+                            scope.lookupType(vd.type().get()),
                             // TODO second pass for initializers
                             // this does not allow for typing the initializers
                             // needs a second pass after all types and functions
                             // are collected and the scope is established
                             Optional.empty()))
                     .toList();
-            map.put(Type.of(name), new TDataDefinition(name, varDecls));
+            Type dataType = Type.of(scope.module, name);
+            map.put(dataType, new TDataDefinition(name, varDecls, Type.of(scope.module, name)));
 
             functionRegistry.map.put(
-                    new FunctionRegistry.CallPair(Optional.empty(), name),
-                    new FunctionRegistry.Function(Optional.empty(),name, Type.of(name), varDecls.stream().map(vd -> new FunctionRegistry.Function.Parameter(vd.name(), vd.type())).toList(), null));
+                    new FunctionRegistry.CallPair(scope.module, Optional.empty(), name),
+                    new FunctionRegistry.Function(Optional.empty(),name, dataType, varDecls.stream().map(vd -> new FunctionRegistry.Function.Parameter(vd.name(), vd.type())).toList(), null));
         }
 
         Type lookupFieldType(Type type, String name) {
@@ -311,24 +333,35 @@ public class AstTyper {
     @RequiredArgsConstructor
     static class Scope {
         final Scope parentScope;
+        final String module;
 
-        static final Scope EMPTY = new Scope(null) {
-            Type lookupType(String name) {
-                throw new RuntimeException("name " + name + " not found");
-            }
-        };
-
-        Scope newScope() {
-            return new Scope(this);
+        static Scope empty(String module) {
+            return new Scope(null, module) {
+                Type lookupType(String name) {
+                    return switch (name) {
+                        case "Int", "Void", "String" -> Type.of("core", name);
+                        default -> throw new RuntimeException("name " + name + " not found");
+                    };
+                }
+            };
         }
 
-        final Map<String, Type> vars = new HashMap<>();
+        Scope newScope() {
+            return new Scope(this, this.module);
+        }
+
+        // split into var, type, function names?
+        final Map<String, Type> names = new HashMap<>();
         Type lookupType(String name) {
-            var result = vars.get(name);
+            var result = names.get(name);
             if (result == null) {
                 return parentScope.lookupType(name);
             }
             return result;
+        }
+
+        public void put(String name, Type dataType) {
+            names.put(name, dataType);
         }
     }
 
