@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.github.musiKk.Tokenizer.TokenType;
 import com.github.musiKk.parser.CompilationUnit.AssignmentExpression;
@@ -47,6 +48,7 @@ import com.github.musiKk.parser.TCompilationUnit.TVariableDeclaration;
 import com.github.musiKk.parser.TCompilationUnit.TVariableExpression;
 
 import lombok.RequiredArgsConstructor;
+import lombok.ToString;
 
 @RequiredArgsConstructor
 public class AstTyper {
@@ -55,41 +57,74 @@ public class AstTyper {
     private final FunctionRegistry functionRegistry = new FunctionRegistry();
     private final DataRegistry dataRegistry = new DataRegistry(functionRegistry);
 
-    public TCompilationUnit typeProgram(String name) {
+    private final TyperResults typerResults = new TyperResults();
+
+    public Map<String, TCompilationUnit> typeProgram(String name) {
+        var tr = typeModule(name);
+        typerResults.putMainModule(name, tr);
+        return typerResults.map.entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().tcu));
+    }
+
+    public TyperResult typeModule(String name) {
         var cu = cuLoader.load(name);
         var c = new Object() {
             List<DataDefinition> dds = new ArrayList<>();
             List<FunctionDeclaration> fds = new ArrayList<>();
             List<Statement> stmts = new ArrayList<>();
         };
+        List<String> imports = new ArrayList<>();
         cu.statements().stream()
                 .forEach(s -> {
                     switch (s) {
                         case DataDefinition dd -> c.dds.add(dd);
                         case FunctionDeclaration fd -> c.fds.add(fd);
+                        case Import i -> {
+                            imports.add(i.name());
+                            c.stmts.add(i);
+                        }
                         default -> c.stmts.add(s);
                     };
                 });
 
-        var scope = Scope.empty(name).newScope();
+        resolveImports(imports);
+
+        var scope = Scope.empty(this, name).newScope();
+        scope.importedModules.addAll(imports);
         collectTypes(c.dds, scope);
         collectFunctions(c.fds, scope);
 
+        var tDds = dataRegistry.map.values().stream()
+                // XXX hack
+                .filter(tdd -> tdd.type().module().equals(name))
+                .toList();
         var tStmts = typeStatements(c.stmts, scope);
+        var tFds = functionRegistry.map.entrySet().stream()
+                // XXX hack
+                .filter(e -> e.getKey().module().equals(name))
+                .map(Map.Entry::getValue)
+                .filter(f -> f.functionDeclaration != null)
+                .map(FunctionRegistry.Function::functionDeclaration)
+                .map(f -> typeFunctionDeclaration(f, scope))
+                .toList();
 
-        return new TCompilationUnit(
-                new ArrayList<>(dataRegistry.map.values()),
-                functionRegistry.map.values().stream()
-                        .filter(f -> f.functionDeclaration != null)
-                        .map(FunctionRegistry.Function::functionDeclaration)
-                        .map(f -> typeFunctionDeclaration(f, scope))
-                        .toList(),
-                tStmts);
+        return new TyperResult(scope, new TCompilationUnit(tDds, tFds, tStmts));
+    }
+
+    private void resolveImports(List<String> modules) {
+        modules.stream().forEach(this::resolveModule);
+    }
+
+    private void resolveModule(String name) {
+        if (typerResults.isLoaded(name)) return;
+        var tr = typeModule(name);
+        typerResults.put(name, tr);
     }
 
     private List<TStatement> typeStatements(List<Statement> statements, Scope scope) {
         return statements.stream()
                 .map(s -> typeStatement(s, scope))
+                .filter(s -> s != null)
                 .toList();
     }
 
@@ -99,9 +134,12 @@ public class AstTyper {
             case VariableDeclaration vd -> typeVariableDeclaration(vd, scope);
             case DataDefinition dd -> dataRegistry.map.get(scope.lookupType(dd.name()));
             case Import(var name) -> {
-                // 1. check if name is already loaded
-                // 2. if not, load which will populate the function and data registry
-                // 3. add the module to the scope so that its names are available for lookup
+                // this is how it should be but it throws b/c it modifies the
+                // function registry while iterating over it in typeModule
+                // scope.importedModules.add(name);
+                // resolveImport(name);
+
+                // XXX ugh, hack
                 yield null;
             }
             default -> throw new RuntimeException("unsupported statement " + statement);
@@ -176,7 +214,9 @@ public class AstTyper {
                 var arguments = fee.arguments().stream()
                         .map(a -> typeExpression(a, scope))
                         .toList();
-                var type = functionRegistry.lookup(scope.module, targetType, name).type;
+
+                var fType = scope.lookupType(new Scope.TargetAndName(targetType, name));
+                var type = functionRegistry.lookup(fType.module(), targetType, name).type;
                 yield new TFunctionEvaluationExpression(target, name, arguments, type);
             }
             case BinaryExpression be -> {
@@ -267,6 +307,15 @@ public class AstTyper {
                             .toList(),
                     ufd);
             map.put(callPair, function);
+
+            scope.put(
+                    new Scope.TargetAndName(receiverType, sig.name()),
+                    Type.of(
+                            scope.module,
+                            sig.receiver().map(scope::lookupType),
+                            sig.name(),
+                            scope.lookupType(sig.returnType()),
+                            sig.parameters().stream().map(p -> scope.lookupType(p.type().get())).toList()));
         }
 
         Function lookup(String module, Optional<Type> receiver, String name) {
@@ -328,18 +377,23 @@ public class AstTyper {
         }
     }
 
+    @ToString
     @RequiredArgsConstructor
-    static class Scope {
+    class Scope {
         final Scope parentScope;
         final String module;
+        final List<String> importedModules = new ArrayList<>();
 
-        static Scope empty(String module) {
-            return new Scope(null, module) {
+        static Scope empty(AstTyper typer, String module) {
+            return typer.new Scope(null, module) {
                 Type lookupType(String name) {
                     return switch (name) {
                         case "Int", "Void", "String" -> Type.of("core", name);
                         default -> throw new RuntimeException("name " + name + " not found");
                     };
+                }
+                Type lookupType(TargetAndName tan) {
+                    throw new RuntimeException("function " + tan + " not found");
                 }
             };
         }
@@ -348,12 +402,35 @@ public class AstTyper {
             return new Scope(this, this.module);
         }
 
-        // split into var, type, function names?
+        // types and variables
         final Map<String, Type> names = new HashMap<>();
+        // functions
+        final Map<TargetAndName, Type> functions = new HashMap<>();
+
         Type lookupType(String name) {
             var result = names.get(name);
             if (result == null) {
+                for (var m : importedModules) {
+                    var ms = typerResults.map.get(m).scope;
+                    try {
+                        return ms.lookupType(name);
+                    } catch (Exception e) {}
+                }
                 return parentScope.lookupType(name);
+            }
+            return result;
+        }
+
+        Type lookupType(TargetAndName tan) {
+            var result = functions.get(tan);
+            if (result == null) {
+                for (var m : importedModules) {
+                    var ms = typerResults.map.get(m).scope;
+                    try {
+                        return ms.lookupType(tan);
+                    } catch (Exception e) {}
+                }
+                return parentScope.lookupType(tan);
             }
             return result;
         }
@@ -361,6 +438,11 @@ public class AstTyper {
         public void put(String name, Type dataType) {
             names.put(name, dataType);
         }
+        public void put(TargetAndName tan, Type functionType) {
+            functions.put(tan, functionType);
+        }
+
+        static record TargetAndName(Optional<Type> target, String name) {}
     }
 
     private static final Set<TokenType> BOOLEAN_OPERATORS = Set.of(
@@ -371,5 +453,25 @@ public class AstTyper {
     public static interface CompilationUnitLoader {
         CompilationUnit load(String name);
     }
+
+    @ToString
+    public static class TyperResults {
+        private final Map<String, TyperResult> map = new HashMap<>();
+        private String mainModule;
+
+        void putMainModule(String module, TyperResult tr) {
+            mainModule = module;
+            put(module, tr);
+        }
+
+        public boolean isLoaded(String name) {
+            return map.containsKey(name);
+        }
+
+        void put(String module, TyperResult tr) {
+            map.put(module, tr);
+        }
+    }
+    public static record TyperResult(Scope scope, TCompilationUnit tcu) {}
 
 }

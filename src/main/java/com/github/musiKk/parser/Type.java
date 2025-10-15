@@ -1,7 +1,9 @@
 package com.github.musiKk.parser;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -30,8 +32,29 @@ public class Type {
     public static Type of(String module, String name) {
         return CACHE.computeIfAbsent(new Key(module, name), k -> new Type(k.module, k.name));
     }
+    public static Type of(String module, Optional<Type> receiver, String name, Type returnType, List<Type> parameters) {
+        return CACHE.computeIfAbsent(new Key(module, name), k -> new FunctionType(k.module, receiver, k.name, returnType, parameters));
+    }
 
     private static final Map<Key, Type> CACHE = new HashMap<>();
 
     private record Key(String module, String name) {}
+
+    static class FunctionType extends Type {
+        @Accessors(fluent = true)
+        @Getter
+        private final Optional<Type> receiver;
+        @Accessors(fluent = true)
+        @Getter
+        private final Type returnType;
+        @Accessors(fluent = true)
+        @Getter
+        private final List<Type> parameters;
+        FunctionType(String module, Optional<Type> receiver, String name, Type returnType, List<Type> parameters) {
+            super(module, name);
+            this.receiver = receiver;
+            this.returnType = returnType;
+            this.parameters = parameters;
+        }
+    }
 }

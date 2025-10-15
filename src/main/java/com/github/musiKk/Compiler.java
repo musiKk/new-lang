@@ -55,13 +55,19 @@ public class Compiler implements ConfigReader.ConfigTarget {
         compiler.compileProgram("test");
     }
 
-    /**
-     * Compiles an executable starting at {@code pathString}.
-     * @param pathString
-     */
     public void compileProgram(String moduleName) {
         var typer = makeTyper();
-        var tcu = typer.typeProgram(moduleName);
+        var tcus = typer.typeProgram(moduleName);
+
+        // TODO add multi CU suppoert to emitter
+        // for now just collecting everything into one artificial CU
+        var dds = tcus.values().stream()
+                .flatMap(tcu -> tcu.dataDefinitions().stream())
+                .toList();
+        var fds = tcus.values().stream()
+                .flatMap(tcu -> tcu.functionDeclarations().stream())
+                .toList();
+        var tcu = new TCompilationUnit(dds, fds, tcus.get(moduleName).statements());
 
         var output = new Output();
         compileCompilationUnit(tcu, output);
