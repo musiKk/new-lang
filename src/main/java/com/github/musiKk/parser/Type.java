@@ -32,14 +32,19 @@ public class Type {
     public static Type of(String module, String name) {
         return CACHE.computeIfAbsent(new Key(module, name), k -> new Type(k.module, k.name));
     }
-    public static Type of(String module, Optional<Type> receiver, String name, Type returnType, List<Type> parameters) {
-        return CACHE.computeIfAbsent(new Key(module, name), k -> new FunctionType(k.module, receiver, k.name, returnType, parameters));
+    public static Type.FunctionType of(String module, Optional<Type> receiver, String name, Type returnType, List<Type> parameters) {
+        return FCACHE.computeIfAbsent(
+                new TargetAndName(module, receiver, name),
+                k -> new FunctionType(k.module, receiver, k.name, returnType, parameters));
     }
 
     private static final Map<Key, Type> CACHE = new HashMap<>();
+    private static final Map<TargetAndName, FunctionType> FCACHE = new HashMap<>();
 
     private record Key(String module, String name) {}
+    private record TargetAndName(String module, Optional<Type> target, String name) {}
 
+    @ToString
     static class FunctionType extends Type {
         @Accessors(fluent = true)
         @Getter

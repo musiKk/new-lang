@@ -216,8 +216,7 @@ public class AstTyper {
                         .toList();
 
                 var fType = scope.lookupType(new Scope.TargetAndName(targetType, name));
-                var type = functionRegistry.lookup(fType.module(), targetType, name).type;
-                yield new TFunctionEvaluationExpression(target, name, arguments, type);
+                yield new TFunctionEvaluationExpression(target, name, arguments, fType.returnType());
             }
             case BinaryExpression be -> {
                 var left = typeExpression(be.left(), scope);
@@ -392,7 +391,7 @@ public class AstTyper {
                         default -> throw new RuntimeException("name " + name + " not found");
                     };
                 }
-                Type lookupType(TargetAndName tan) {
+                Type.FunctionType lookupType(TargetAndName tan) {
                     throw new RuntimeException("function " + tan + " not found");
                 }
             };
@@ -405,7 +404,7 @@ public class AstTyper {
         // types and variables
         final Map<String, Type> names = new HashMap<>();
         // functions
-        final Map<TargetAndName, Type> functions = new HashMap<>();
+        final Map<TargetAndName, Type.FunctionType> functions = new HashMap<>();
 
         Type lookupType(String name) {
             var result = names.get(name);
@@ -421,7 +420,7 @@ public class AstTyper {
             return result;
         }
 
-        Type lookupType(TargetAndName tan) {
+        Type.FunctionType lookupType(TargetAndName tan) {
             var result = functions.get(tan);
             if (result == null) {
                 for (var m : importedModules) {
@@ -438,7 +437,7 @@ public class AstTyper {
         public void put(String name, Type dataType) {
             names.put(name, dataType);
         }
-        public void put(TargetAndName tan, Type functionType) {
+        public void put(TargetAndName tan, Type.FunctionType functionType) {
             functions.put(tan, functionType);
         }
 
