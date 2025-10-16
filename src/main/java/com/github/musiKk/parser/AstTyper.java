@@ -54,8 +54,7 @@ import lombok.ToString;
 public class AstTyper {
     private final CompilationUnitLoader cuLoader;
 
-    private final FunctionRegistry functionRegistry = new FunctionRegistry();
-    private final DataRegistry dataRegistry = new DataRegistry(functionRegistry);
+    private final DataRegistry dataRegistry = new DataRegistry();
 
     private final TyperResults typerResults = new TyperResults();
 
@@ -91,22 +90,10 @@ public class AstTyper {
 
         var scope = Scope.empty(this, name).newScope();
         scope.importedModules.addAll(imports);
-        collectTypes(c.dds, scope);
-        collectFunctions(c.fds, scope);
+        var tDds = collectTypes(c.dds, scope);
+        var tFds = collectFunctions(c.fds, scope);
 
-        var tDds = dataRegistry.map.values().stream()
-                // XXX hack
-                .filter(tdd -> tdd.type().module().equals(name))
-                .toList();
         var tStmts = typeStatements(c.stmts, scope);
-        var tFds = functionRegistry.map.entrySet().stream()
-                // XXX hack
-                .filter(e -> e.getKey().module().equals(name))
-                .map(Map.Entry::getValue)
-                .filter(f -> f.functionDeclaration != null)
-                .map(FunctionRegistry.Function::functionDeclaration)
-                .map(f -> typeFunctionDeclaration(f, scope))
-                .toList();
 
         return new TyperResult(scope, new TCompilationUnit(tDds, tFds, tStmts));
     }
@@ -124,6 +111,7 @@ public class AstTyper {
     private List<TStatement> typeStatements(List<Statement> statements, Scope scope) {
         return statements.stream()
                 .map(s -> typeStatement(s, scope))
+                // XXX hack b/c of imports
                 .filter(s -> s != null)
                 .toList();
     }
@@ -136,8 +124,8 @@ public class AstTyper {
             case Import(var name) -> {
                 // this is how it should be but it throws b/c it modifies the
                 // function registry while iterating over it in typeModule
-                // scope.importedModules.add(name);
-                // resolveImport(name);
+                scope.importedModules.add(name);
+                resolveModule(name);
 
                 // XXX ugh, hack
                 yield null;
@@ -196,7 +184,10 @@ public class AstTyper {
                 var blockScope = scope.newScope();
                 List<TStatement> tStatements = new ArrayList<>();
                 for (int i = 0; i < be.statements().size() - 1; i++) {
-                    tStatements.add(typeStatement(be.statements().get(i), blockScope));
+                    var tStmt = typeStatement(be.statements().get(i), blockScope);
+                    // XXX hack b/c of imports
+                    if (tStmt == null) continue;
+                    tStatements.add(tStmt);
                 }
                 var returnStatement = be.statements().getLast();
                 if (!(returnStatement instanceof ExpressionStatement)) {
@@ -260,94 +251,35 @@ public class AstTyper {
         }
     }
 
-    private void collectFunctions(List<FunctionDeclaration> functionDeclarations, Scope scope) {
+    private List<TFunctionDeclaration> collectFunctions(List<FunctionDeclaration> functionDeclarations, Scope scope) {
         functionDeclarations.stream()
-                .forEach(fd -> functionRegistry.registerFunction(fd, scope));
+                .forEach(fd -> scope.putFunction(fd.signature()));
+        return functionDeclarations.stream()
+                .<UserFunctionDeclaration>mapMulti((fd, c) -> {
+                    if (fd instanceof UserFunctionDeclaration ufd) {
+                        c.accept(ufd);
+                    }
+                })
+                .map(fd -> typeFunctionDeclaration(fd, scope))
+                .toList();
     }
 
-    public void addPrototype(FunctionSignature sig, Scope scope) {
-        functionRegistry.registerPrototype(sig, scope);
-    }
-
-    static class FunctionRegistry {
-        Map<CallPair, Function> map = new HashMap<>();
-
-        public void registerPrototype(FunctionSignature sig, Scope scope) {
-            registerFunction(null, sig, scope);
-        }
-
-        public void registerFunction(FunctionDeclaration fd, Scope scope) {
-            registerFunction(fd, fd.signature(), scope);
-        }
-
-        private void registerFunction(FunctionDeclaration fd, FunctionSignature sig, Scope scope) {
-            var receiverType = sig.receiver().map(scope::lookupType);
-
-            var callPair = new CallPair(
-                scope.module,
-                receiverType,
-                sig.name()
-            );
-            if (map.containsKey(callPair)) {
-                throw new RuntimeException("function " + callPair + " already defined");
-            }
-
-            UserFunctionDeclaration ufd = null;
-            if (fd instanceof UserFunctionDeclaration) {
-                ufd = (UserFunctionDeclaration) fd;
-            }
-
-            var function = new Function(
-                    sig.receiver().map(scope::lookupType),
-                    sig.name(),
-                    scope.lookupType(sig.returnType()),
-                    sig.parameters().stream()
-                            .map(p -> new Function.Parameter(p.name(), scope.lookupType(p.type().get())))
-                            .toList(),
-                    ufd);
-            map.put(callPair, function);
-
-            scope.put(
-                    new Scope.TargetAndName(receiverType, sig.name()),
-                    Type.of(
-                            scope.module,
-                            sig.receiver().map(scope::lookupType),
-                            sig.name(),
-                            scope.lookupType(sig.returnType()),
-                            sig.parameters().stream().map(p -> scope.lookupType(p.type().get())).toList()));
-        }
-
-        Function lookup(String module, Optional<Type> receiver, String name) {
-            return map.get(new CallPair(module, receiver, name));
-        }
-
-        private record CallPair(String module, Optional<Type> receiver, String name) {}
-
-        record Function(
-                Optional<Type> receiver,
-                String name,
-                Type type,
-                List<Parameter> parameters,
-                UserFunctionDeclaration functionDeclaration) {
-            record Parameter(String name, Type type) {}
-        }
-    }
-
-    void collectTypes(List<DataDefinition> dataDefinitions, Scope scope) {
+    List<TDataDefinition> collectTypes(List<DataDefinition> dataDefinitions, Scope scope) {
         dataDefinitions.stream().forEach(dd -> {
             var name = dd.name();
             var dataType = Type.of(scope.module, name);
             scope.put(name, dataType);
         });
-        dataDefinitions.stream().forEach(dd -> dataRegistry.register(dd, scope));
+        return dataDefinitions.stream()
+                .map(dd -> dataRegistry.register(dd, scope))
+                .toList();
     }
 
     @RequiredArgsConstructor
     static class DataRegistry {
-        final FunctionRegistry functionRegistry;
         final Map<Type, TDataDefinition> map = new HashMap<>();
 
-        void register(DataDefinition dd, Scope scope) {
+        TDataDefinition register(DataDefinition dd, Scope scope) {
             var name = dd.name();
             var varDecls = dd.variableDeclarations().stream()
                     .map(vd -> new TVariableDeclaration(
@@ -360,11 +292,12 @@ public class AstTyper {
                             Optional.empty()))
                     .toList();
             Type dataType = Type.of(scope.module, name);
-            map.put(dataType, new TDataDefinition(name, varDecls, Type.of(scope.module, name)));
+            var tDd = new TDataDefinition(name, varDecls, Type.of(scope.module, name));
+            map.put(dataType, tDd);
 
-            functionRegistry.registerPrototype(new FunctionSignature(
-                Optional.empty(), name, dd.variableDeclarations(), name
-            ), scope);
+            scope.putFunction(new FunctionSignature(Optional.empty(), name, dd.variableDeclarations(), name));
+
+            return tDd;
         }
 
         Type lookupFieldType(Type type, String name) {
@@ -437,8 +370,20 @@ public class AstTyper {
         public void put(String name, Type dataType) {
             names.put(name, dataType);
         }
-        public void put(TargetAndName tan, Type.FunctionType functionType) {
-            functions.put(tan, functionType);
+
+        public void putFunction(FunctionSignature sig) {
+            var receiverType = sig.receiver().map(r -> this.lookupType(r));
+
+            functions.put(
+                    new TargetAndName(receiverType, sig.name()),
+                    Type.of(
+                            module,
+                            receiverType,
+                            sig.name(),
+                            lookupType(sig.returnType()),
+                            sig.parameters().stream()
+                                    .map(p -> lookupType(p.type().get()))
+                                    .toList()));
         }
 
         static record TargetAndName(Optional<Type> target, String name) {}
