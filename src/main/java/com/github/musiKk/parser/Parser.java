@@ -3,9 +3,7 @@ package com.github.musiKk.parser;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.BiFunction;
 
-import com.github.musiKk.Tokenizer;
 import com.github.musiKk.Tokenizer.TokenType;
 import com.github.musiKk.Tokenizer.Tokens;
 import com.github.musiKk.parser.CompilationUnit.ArrayAssignmentExpression;
@@ -51,7 +49,7 @@ public class Parser {
         return new CompilationUnit(statements);
     }
 
-    private Statement parseStatement(Tokens tokens) {
+    Statement parseStatement(Tokens tokens) {
         var token = tokens.peek();
 
         return switch (token.type()) {
@@ -201,7 +199,7 @@ public class Parser {
         return new VariableDeclaration(nameToken.image(), type, initialization);
     }
 
-    private Expression parseExpression(Tokens tokens) {
+    Expression parseExpression(Tokens tokens) {
         return parseAssignment(tokens);
     }
 
@@ -409,182 +407,6 @@ public class Parser {
             statements.add(statement);
         }
         return new BlockExpression(statements);
-    }
-
-    public static void main(String[] args) {
-        var p = new Parser();
-
-        List<TestCase<?>> testCases = new ArrayList<>();
-        testCases.add(new StatementTestCase(
-            "data Foo { x: int }",
-            new DataDefinition("Foo", List.of(new VariableDeclaration("x", "int")))
-            ));
-        testCases.add(new StatementTestCase(
-            "var x = 1", new VariableDeclaration("x", new NumberExpression(1))));
-        testCases.add(new StatementTestCase(
-            "def foo() = {}",
-            new UserFunctionDeclaration(new FunctionSignature(Optional.empty(), "foo", List.of(), "void"), new BlockExpression(List.of()))));
-        testCases.add(new StatementTestCase(
-            "def foo(i) = {}",
-            new UserFunctionDeclaration(new FunctionSignature(Optional.empty(), "foo", List.of(new VariableDeclaration("i")), "void"), new BlockExpression(List.of()))));
-        testCases.add(new StatementTestCase(
-            "def Foo.foo() = {}",
-            new UserFunctionDeclaration(new FunctionSignature(Optional.of("Foo"), "foo", List.of(), "void"), new BlockExpression(List.of()))));
-        testCases.add(new StatementTestCase(
-            "trait Dog { def bark() }",
-            new TraitDefinition("Dog", List.of(new FunctionSignature(Optional.empty(), "bark", List.of(), "void")))));
-        testCases.add(new ExpressionTestCase(
-            "foo()",
-            new FunctionEvaluationExpression("foo", List.of())));
-        testCases.add(new ExpressionTestCase(
-            "foo(1)",
-            new FunctionEvaluationExpression("foo", List.of(new NumberExpression(1)))));
-        testCases.add(new ExpressionTestCase(
-            "foo(\"foo\")",
-            new FunctionEvaluationExpression("foo", List.of(new StringExpression("foo")))));
-        testCases.add(new ExpressionTestCase(
-            "foo.bar",
-            new VariableExpression(new VariableExpression("foo"), "bar")));
-        testCases.add(new ExpressionTestCase(
-            "foo.bar()",
-            new FunctionEvaluationExpression(new VariableExpression("foo"), "bar", List.of())));
-        testCases.add(new ExpressionTestCase(
-            "a + b",
-            new BinaryExpression(new VariableExpression("a"), TokenType.PLUS, new VariableExpression("b"))));
-        testCases.add(new ExpressionTestCase(
-            "a + b * c",
-            new BinaryExpression(
-                new VariableExpression("a"),
-                TokenType.PLUS,
-                new BinaryExpression(
-                    new VariableExpression("b"),
-                    TokenType.STAR,
-                    new VariableExpression("c")))));
-        testCases.add(new ExpressionTestCase(
-            "a + b.c",
-            new BinaryExpression(
-                new VariableExpression("a"),
-                TokenType.PLUS,
-                new VariableExpression(new VariableExpression("b"), "c"))));
-        testCases.add(new ExpressionTestCase(
-            "a + b.c()",
-            new BinaryExpression(
-                new VariableExpression("a"),
-                TokenType.PLUS,
-                new FunctionEvaluationExpression(new VariableExpression("b"), "c", List.of()))));
-        testCases.add(new ExpressionTestCase(
-            "b.c() + a",
-            new BinaryExpression(
-                new FunctionEvaluationExpression(new VariableExpression("b"), "c", List.of()),
-                TokenType.PLUS,
-                new VariableExpression("a"))));
-        testCases.add(new ExpressionTestCase(
-            "a.b().c.d()",
-            new FunctionEvaluationExpression(
-                new VariableExpression(new FunctionEvaluationExpression(new VariableExpression("a"), "b", List.of()), "c"),
-                "d",
-                List.of())));
-        testCases.add(new ExpressionTestCase(
-            "a.b.c",
-            new VariableExpression(new VariableExpression(new VariableExpression("a"), "b"), "c")));
-        testCases.add(new ExpressionTestCase(
-            "a = b",
-            new AssignmentExpression(new VariableExpression("a"), new VariableExpression("b"))));
-        testCases.add(new ExpressionTestCase(
-            "a.b = c",
-            new AssignmentExpression(new VariableExpression(new VariableExpression("a"), "b"), new VariableExpression("c"))));
-        testCases.add(new ExpressionTestCase(
-            "a = b == c", new AssignmentExpression(
-                new VariableExpression("a"),
-                new BinaryExpression(
-                    new VariableExpression("b"),
-                    TokenType.EQUALS_EQUALS,
-                    new VariableExpression("c")))));
-        testCases.add(new ExpressionTestCase("a = b = c", new AssignmentExpression(
-            new VariableExpression("a"),
-            new AssignmentExpression(
-                new VariableExpression("b"),
-                new VariableExpression("c")))));
-        testCases.add(new ExpressionTestCase(
-            "[]int()",
-            new ArrayCreationExpression("int", Optional.empty(), List.of())));
-        testCases.add(new ExpressionTestCase(
-            "[1]int()",
-            new ArrayCreationExpression("int", Optional.of(new NumberExpression(1)), List.of())));
-        testCases.add(new ExpressionTestCase(
-            "[arr.len]int()",
-            new ArrayCreationExpression("int", Optional.of(new VariableExpression(new VariableExpression("arr"), "len")), List.of())));
-        testCases.add(new ExpressionTestCase(
-            "[]int(2, 3)",
-            new ArrayCreationExpression("int", Optional.empty(), List.of(new NumberExpression(2), new NumberExpression(3)))));
-        testCases.add(new ExpressionTestCase(
-            "arr[1]", new ArrayLookupExpression(new VariableExpression("arr"), new NumberExpression(1))));
-        testCases.add(new ExpressionTestCase(
-            "arr[1][2]",
-            new ArrayLookupExpression(
-                new ArrayLookupExpression(new VariableExpression("arr"), new NumberExpression(1)),
-                new NumberExpression(2))));
-        testCases.add(new ExpressionTestCase(
-            "arr[1].foo",
-            new VariableExpression(
-                new ArrayLookupExpression(new VariableExpression("arr"), new NumberExpression(1)),
-                "foo")));
-        testCases.add(new ExpressionTestCase(
-            "arr[1].foo()",
-            new FunctionEvaluationExpression(
-                new ArrayLookupExpression(new VariableExpression("arr"), new NumberExpression(1)),
-                "foo",
-                List.of())));
-        testCases.add(new ExpressionTestCase(
-            "foo()[1]", new ArrayLookupExpression(
-                new FunctionEvaluationExpression("foo", List.of()),
-                new NumberExpression(1))));
-
-        for (var testCase : testCases) {
-            System.err.printf("%-30s", testCase.input());
-
-            var tokens = new Tokenizer().tokenize(testCase.input());
-            Object result;
-            try {
-                result = testCase.parseFn().apply(p, tokens);
-            } catch (Exception e) {
-                System.err.println("FAIL");
-                e.printStackTrace();
-                continue;
-            }
-            if (!result.equals(testCase.expected())) {
-                System.err.println("FAIL");
-                System.err.println("got:      " + result);
-                System.err.println("expected: " + testCase.expected());
-
-            } else {
-                System.err.println("OK");
-            }
-        }
-    }
-
-    interface TestCase<T> {
-        String input();
-        T expected();
-        BiFunction<Parser, Tokens, T> parseFn();
-    }
-
-    record StatementTestCase(
-        String input,
-        Statement expected
-    ) implements TestCase<Statement> {
-        public BiFunction<Parser, Tokens, Statement> parseFn() {
-            return (parser, tokens) -> parser.parseStatement(tokens);
-        }
-    }
-
-    record ExpressionTestCase(
-        String input,
-        Expression expected
-    ) implements TestCase<Expression> {
-        public BiFunction<Parser, Tokens, Expression> parseFn() {
-            return (parser, tokens) -> parser.parseExpression(tokens);
-        }
     }
 
 }
